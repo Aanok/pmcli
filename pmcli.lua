@@ -1,4 +1,9 @@
+#!/usr/bin/env lua
+-- TODO: any sort of error handling. Like, at all.
+
 local PMCLI_VERSION = 0.1
+
+local BASE_ADDR = "https://192.168.1.29:32400"
 
 local html_entities = require "htmlEntities"
 local https = require "ssl.https"
@@ -10,10 +15,9 @@ local handler = require "xmlhandler.tree"
 handler.options = HANDLER_OPTS
 local parser = xml2lua.parser(handler)
 
-local BASE_ADDR = "https://192.168.1.29:32400"
-
 
 function plex_request(suffix)
+  -- TODO: an async version so we can "stream" to mpv
   local body, code, headers, status = https.request(BASE_ADDR .. suffix)
   return body
 end
@@ -70,27 +74,56 @@ function join_keys(s1, s2)
 end
 
 
+function read_commands()
+-- well formed string: 2,3-12,14,16,18-20 etc (, and - where - has precedence)
+-- TODO: replace this embarrassing mess for something that can properly error on malformed strings
+  local commands = {}
+  local iter = {}
+  local n
+  local input = io.read()
+  if input ~= nil then
+    for ranges in input:gmatch("[^,]+") do
+      if ranges:find("%d+%s*-%s*%d+") then
+        iter = ranges:gmatch("[^-]+")
+        low, high = tonumber(iter()), tonumber(iter())
+        for n = low, high do
+          commands[#commands + 1] = n
+        end
+      else
+        n = ranges:gsub("%s+", "")
+        commands[#commands + 1] = tonumber(n)
+      end
+    end
+  end
+  return commands
+end
+
+
 function open_menu(key, is_root)
-  local command = -1
+-- TODO: rewrite to avoid recursion (so old handlers can go out of scope and be GC'd)
+-- we'll need a stack of menu keys to know where to backtrack
   local mc
-  while command ~= 0 do
-    print("in open_menu, key: " .. key)
+  while true do
+    --print("in open_menu, key: " .. key)
     handler = handler:new()
     handler.options = HANDLER_OPTS
     parser = xml2lua.parser(handler)
     parser:parse(plex_request(key))
     mc = handler.root.MediaContainer
     print_current_menu(is_root)
-    command = io.read("*number")
-    if command ~= 0 then
-      if mc.Directory ~= nil then
-        open_menu(join_keys(key, mc.Directory[command]._attr.key), false)
-      elseif mc.Track ~= nil then
-        local media = plex_request(join_keys(key, mc.Track[command].Media.Part._attr.key))
-        play_stream(media)
-      elseif mc.Video ~= nil then
-        local media = plex_request(join_keys(key, mc.Video[command].Media.Part._attr.key))
-        play_stream(media)
+    for _,c in ipairs(read_commands()) do
+      if c == 0 then
+        return
+      else
+        if mc.Directory ~= nil then
+          open_menu(join_keys(key, mc.Directory[c]._attr.key), false)
+        elseif mc.Track ~= nil then
+          local media = plex_request(join_keys(key, mc.Track[c].Media.Part._attr.key))
+          play_stream(media)
+        elseif mc.Video ~= nil then
+          local media = plex_request(join_keys(key, mc.Video[c].Media.Part._attr.key))
+          play_stream(media)
+        end
       end
     end
   end
