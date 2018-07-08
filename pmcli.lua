@@ -43,10 +43,10 @@ function print_current_menu(is_root)
   else
     print("0: quit")
   end
-  for _,mc in pairs(handler.root.MediaContainer) do
+  for tag,mc in pairs(handler.root.MediaContainer) do
     for i,d in ipairs(mc) do
       if d._attr and d._attr.title then
-        print(i .. ": " .. html_entities.decode(d._attr.title))
+        print(tag:sub(1,1) .. " " .. i .. ": " .. html_entities.decode(d._attr.title))
       end
     end
   end
@@ -56,7 +56,6 @@ end
 function join_keys(s1, s2)
   local i = 0
   local match_length = -1
-  --print(s1 .. " vs " .. s2)
   -- preprocessing: remove leading /
   if s1:sub(1,1) == "/" then s1 = s1:sub(2) end
   if s2:sub(1,1) == "/" then s2 = s2:sub(2) end
@@ -108,7 +107,6 @@ function open_menu(key, is_root)
 -- we'll need a stack of menu keys to know where to backtrack
   local mc
   while true do
-    --print("in open_menu, key: " .. key)
     handler = handler:new()
     handler.options = HANDLER_OPTS
     parser = xml2lua.parser(handler)
@@ -138,5 +136,4 @@ end
 
 print("Plex Media CLIent v" ..  PMCLI_VERSION .. "\n")
 open_menu("/library/sections", true)
---open_menu("/library/metadata/81774/children", false)
 print("Bye!")
