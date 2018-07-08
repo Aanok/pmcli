@@ -38,7 +38,11 @@ end
 
 function print_current_menu(is_root)
   print("=== " .. handler.root.MediaContainer._attr.title1 .. " ===")
-  if is_root == false then print("0: ..") end
+  if is_root == false then
+    print("0: ..") 
+  else
+    print("0: quit")
+  end
   for _,mc in pairs(handler.root.MediaContainer) do
     for i,d in ipairs(mc) do
       if d._attr and d._attr.title then
@@ -52,7 +56,7 @@ end
 function join_keys(s1, s2)
   local i = 0
   local match_length = -1
-  print(s1 .. " vs " .. s2)
+  --print(s1 .. " vs " .. s2)
   -- preprocessing: remove leading /
   if s1:sub(1,1) == "/" then s1 = s1:sub(2) end
   if s2:sub(1,1) == "/" then s2 = s2:sub(2) end
