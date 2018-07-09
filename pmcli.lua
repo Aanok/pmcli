@@ -37,7 +37,7 @@ end
 
 
 function print_current_menu(is_root)
-  print("=== " .. handler.root.MediaContainer._attr.title1 .. " ===")
+  print("=== " .. html_entities.decode(handler.root.MediaContainer._attr.title1) .. " ===")
   if is_root == false then
     print("0: ..") 
   else
