@@ -135,7 +135,7 @@ function open_menu(key, is_root)
       elseif items[c]._tag == "Directory" then
         open_menu(join_keys(key, items[c]._attr.key), false)
       elseif items[c]._tag == "Video" or items[c]._tag == "Track" then
-        local media = plex_request(join_keys(key, items[c]._attr.key))
+        local media = plex_request(join_keys(key, items[c].Media.Part._attr.key))
         play_stream(media)
       end
     end
