@@ -1,19 +1,19 @@
 #!/usr/bin/env lua
 -- TODO: any sort of error handling. Like, at all.
 
-local PMCLI_VERSION = 0.1
+PMCLI_VERSION = 0.1
 
-local BASE_ADDR = "https://192.168.1.29:32400"
+BASE_ADDR = "https://192.168.1.29:32400"
 
-local html_entities = require "htmlEntities"
-local https = require "ssl.https"
-local xml2lua = require "xml2lua"
+html_entities = require "htmlEntities"
+https = require "ssl.https"
+xml2lua = require "xml2lua"
 
-local HANDLER_OPTS = { noreduce = { Directory = true, Track = true }}
+HANDLER_OPTS = { noreduce = { Directory = true, Track = true }}
 
-local handler = require "xmlhandler.tree"
+handler = require "xmlhandler.tree"
 handler.options = HANDLER_OPTS
-local parser = xml2lua.parser(handler)
+parser = xml2lua.parser(handler)
 
 
 function plex_request(suffix)
@@ -35,20 +35,30 @@ function play_stream(stream)
 end
 
 
+function get_menu_items()
+  local items = {}
+  for child_name, child in pairs(handler.root.MediaContainer) do
+    for i,item in pairs(child) do
+      if item._attr and item._attr.title then
+        item._tag = child_name
+        items[#items + 1] = item
+      end
+    end
+  end
+  items._menu_title = handler.root.MediaContainer._attr.title1
+  return items
+end
 
-function print_current_menu(is_root)
-  print("=== " .. html_entities.decode(handler.root.MediaContainer._attr.title1) .. " ===")
+
+function print_menu(items, is_root)
+  print("=== " .. html_entities.decode(items._menu_title) .. " ===")
   if is_root == false then
     print("0: ..") 
   else
     print("0: quit")
   end
-  for tag,mc in pairs(handler.root.MediaContainer) do
-    for i,d in ipairs(mc) do
-      if d._attr and d._attr.title then
-        print(tag:sub(1,1) .. " " .. i .. ": " .. html_entities.decode(d._attr.title))
-      end
-    end
+  for i,item in ipairs(items) do
+    print(item._tag:sub(1,1) .. " " .. i .. ": " .. html_entities.decode(item._attr.title))
   end
 end
 
@@ -85,6 +95,9 @@ function read_commands()
   local n
   local input = io.read()
   if input ~= nil then
+    if input == "q" then
+      return { "q" }
+    end
     for ranges in input:gmatch("[^,]+") do
       if ranges:find("%d+%s*-%s*%d+") then
         iter = ranges:gmatch("[^-]+")
@@ -105,27 +118,25 @@ end
 function open_menu(key, is_root)
 -- TODO: rewrite to avoid recursion (so old handlers can go out of scope and be GC'd)
 -- we'll need a stack of menu keys to know where to backtrack
-  local mc
+  local items
+  handler = handler:new()
+  handler.options = HANDLER_OPTS
+  parser = xml2lua.parser(handler)
+  parser:parse(plex_request(key))
+  items = get_menu_items()
   while true do
-    handler = handler:new()
-    handler.options = HANDLER_OPTS
-    parser = xml2lua.parser(handler)
-    parser:parse(plex_request(key))
-    mc = handler.root.MediaContainer
-    print_current_menu(is_root)
+    print_menu(items, is_root)
     for _,c in ipairs(read_commands()) do
       if c == 0 then
         return
-      else
-        if mc.Directory ~= nil then
-          open_menu(join_keys(key, mc.Directory[c]._attr.key), false)
-        elseif mc.Track ~= nil then
-          local media = plex_request(join_keys(key, mc.Track[c].Media.Part._attr.key))
-          play_stream(media)
-        elseif mc.Video ~= nil then
-          local media = plex_request(join_keys(key, mc.Video[c].Media.Part._attr.key))
-          play_stream(media)
-        end
+      elseif c == "q" then
+        print("Bye!")
+        os.exit()
+      elseif items[c]._tag == "Directory" then
+        open_menu(join_keys(key, items[c]._attr.key), false)
+      elseif items[c]._tag == "Video" or items[c]._tag == "Track" then
+        local media = plex_request(join_keys(key, items[c]._attr.key))
+        play_stream(media)
       end
     end
   end
