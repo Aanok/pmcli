@@ -1,11 +1,13 @@
 #!/usr/bin/env lua
 -- TODO: any sort of error handling. Like, at all.
 
-local PMCLI_VERSION = 0.1
+local PMCLI_VERSION = 0.2
 
 -- ====== CONFIG OPTIONS =====
 local BASE_ADDR = "https://192.168.1.29:32400"
 local REQUIRE_HOSTNAME_VALIDATION = false
+local PLEX_TOKEN = ""
+local UNIQUE_IDENTIFIER = "pmcli-x220-linux"
 -- ===========================
 
 -- lua-http for networking
@@ -32,10 +34,20 @@ end
 local ssl_context = setup_ssl_context(REQUIRE_HOSTNAME_VALIDATION)
 
 
+-- headers for auth access
+function setup_headers(headers, token)
+headers:append("X-Plex-Client-Identifier", UNIQUE_IDENTIFIER)
+headers:append("X-Plex-Product", "PMCLI")
+headers:append("X-Plex-Version", PMCLI_VERSION)
+headers:append("X-Plex-Token", token, true)
+end
+
+
 function plex_request(suffix, file)
 -- TODO: error handling
   local request = http_request.new_from_uri(BASE_ADDR .. suffix)
   request.ctx = ssl_context
+  setup_headers(request.headers, PLEX_TOKEN)
   local headers, stream = request:go()
   return file and stream:save_body_to_file(file) or stream:get_body_as_string()
 end
@@ -154,7 +166,6 @@ end
 
 
 -- ===== MAIN BODY STARTS HERE =====
-ssl_context = setup_ssl_context(REQUIRE_HOSTNAME_VALIDATION)
 print("Plex Media CLIent v" ..  PMCLI_VERSION .. "\n")
 open_menu("/library/sections", true)
 print("Bye!")
