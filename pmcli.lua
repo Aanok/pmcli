@@ -1,10 +1,11 @@
 #!/usr/bin/env lua
 -- TODO: any sort of error handling. Like, at all.
 
-local PMCLI_VERSION = 0.2
+local PMCLI_VERSION = "0.2"
 
 -- ====== CONFIG OPTIONS =====
 local BASE_ADDR = "https://192.168.1.29:32400"
+BASE_ADDR = "https://aanok.chickenkiller.com:32400"
 local REQUIRE_HOSTNAME_VALIDATION = false
 local PLEX_TOKEN = ""
 local UNIQUE_IDENTIFIER = "pmcli-x220-linux"
@@ -36,10 +37,10 @@ local ssl_context = setup_ssl_context(REQUIRE_HOSTNAME_VALIDATION)
 
 -- headers for auth access
 function setup_headers(headers, token)
-headers:append("X-Plex-Client-Identifier", UNIQUE_IDENTIFIER)
-headers:append("X-Plex-Product", "PMCLI")
-headers:append("X-Plex-Version", PMCLI_VERSION)
-headers:append("X-Plex-Token", token, true)
+  headers:append("X-Plex-Client-Identifier", UNIQUE_IDENTIFIER)
+  headers:append("X-Plex-Product", "PMCLI")
+  headers:append("X-Plex-Version", PMCLI_VERSION)
+  headers:append("X-Plex-Token", token, true)
 end
 
 
