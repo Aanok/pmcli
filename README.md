@@ -1,7 +1,7 @@
 # Plex Media CLIent
 
 ## Dependencies
-* `luarocks install luasec`
+* `luarocks install lua-http`
 * `luarocks install xml2lua`
 * `luarocks install html-entities`
 * `mpv` must be in PATH.
