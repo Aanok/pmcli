@@ -1,35 +1,50 @@
 #!/usr/bin/env lua
 -- TODO: any sort of error handling. Like, at all.
 
-PMCLI_VERSION = 0.1
+local PMCLI_VERSION = 0.1
 
-BASE_ADDR = "https://192.168.1.29:32400"
+-- ====== CONFIG OPTIONS =====
+local BASE_ADDR = "https://192.168.1.29:32400"
+local REQUIRE_HOSTNAME_VALIDATION = false
+-- ===========================
 
-html_entities = require "htmlEntities"
-https = require "ssl.https"
-xml2lua = require "xml2lua"
+-- lua-http for networking
+local http_request = require("http.request")
 
-HANDLER_OPTS = { noreduce = { Directory = true, Track = true }}
+-- html entities (escape sequences)
+local html_entities = require("htmlEntities")
 
-handler = require "xmlhandler.tree"
+-- xml parsing
+local xml2lua = require("xml2lua")
+local HANDLER_OPTS = { noreduce = { Directory = true, Track = true, Video = true }}
+local handler = require("xmlhandler.tree")
 handler.options = HANDLER_OPTS
-parser = xml2lua.parser(handler)
+local parser = xml2lua.parser(handler)
 
 
-function plex_request(suffix)
-  -- TODO: an async version so we can "stream" to mpv
-  local body, code, headers, status = https.request(BASE_ADDR .. suffix)
-  return body
+-- if we need to step around mismatched hostnames from the certificate
+-- function to setup keeping a clean environment
+function setup_ssl_context(require_hostname_validation)
+  local http_tls = require("http.tls")
+  http_tls.has_hostname_validation = require_hostname_validation
+  return http_tls.new_client_context()
+end
+local ssl_context = setup_ssl_context(REQUIRE_HOSTNAME_VALIDATION)
+
+
+function plex_request(suffix, file)
+-- TODO: error handling
+  local request = http_request.new_from_uri(BASE_ADDR .. suffix)
+  request.ctx = ssl_context
+  local headers, stream = request:go()
+  return file and stream:save_body_to_file(file) or stream:get_body_as_string()
 end
 
 
-function play_stream(stream)
+function play_media(suffix)
   local tmp_filename = os.tmpname();
   local tmp_file = io.open(tmp_filename, "w+b")
-  io.output(tmp_file)
-  io.write(stream)
-  io.close()
-  io.output(io.stdout)
+  plex_request(suffix, tmp_file)
   os.execute("mpv " ..  tmp_filename)
   os.remove(tmp_filename)
 end
@@ -52,11 +67,7 @@ end
 
 function print_menu(items, is_root)
   print("=== " .. html_entities.decode(items._menu_title) .. " ===")
-  if is_root == false then
-    print("0: ..") 
-  else
-    print("0: quit")
-  end
+  print(is_root and "0: quit" or "0: ..")
   for i,item in ipairs(items) do
     print(item._tag:sub(1,1) .. " " .. i .. ": " .. html_entities.decode(item._attr.title))
   end
@@ -135,16 +146,15 @@ function open_menu(key, is_root)
       elseif items[c]._tag == "Directory" then
         open_menu(join_keys(key, items[c]._attr.key), false)
       elseif items[c]._tag == "Video" or items[c]._tag == "Track" then
-        local media = plex_request(join_keys(key, items[c].Media.Part._attr.key))
-        play_stream(media)
+        play_media(join_keys(key, items[c].Media.Part._attr.key))
       end
     end
   end
 end
 
 
-
-
+-- ===== MAIN BODY STARTS HERE =====
+ssl_context = setup_ssl_context(REQUIRE_HOSTNAME_VALIDATION)
 print("Plex Media CLIent v" ..  PMCLI_VERSION .. "\n")
 open_menu("/library/sections", true)
 print("Bye!")
