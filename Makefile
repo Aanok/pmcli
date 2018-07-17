@@ -1,6 +1,6 @@
 install :
-	chmod +x pmcli.lua
-	ln -s pmcli.lua /usr/bin/pmcli
+	cp pmcli.lua /usr/bin/pmcli
+	chmod +x /usr/bin/pmcli
 
 uninstall :
 	rm /usr/bin/pmcli
