@@ -3,14 +3,8 @@
 
 local PMCLI_VERSION = "0.2"
 
--- ====== CONFIG OPTIONS =====
-local BASE_ADDR = "https://192.168.1.29:32400"
-BASE_ADDR = "https://aanok.chickenkiller.com:32400"
-local REQUIRE_HOSTNAME_VALIDATION = false
-local PLEX_TOKEN = ""
-local UNIQUE_IDENTIFIER = "pmcli-x220-linux"
--- ===========================
 
+-- ========== REQUIRES ==========
 -- lua-http for networking
 local http_request = require("http.request")
 
@@ -23,6 +17,34 @@ local HANDLER_OPTS = { noreduce = { Directory = true, Track = true, Video = true
 local handler = require("xmlhandler.tree")
 handler.options = HANDLER_OPTS
 local parser = xml2lua.parser(handler)
+-- ==============================
+
+
+-- ========== SETUP ==========
+-- config file shenanigans
+function parse_config()
+  local dir = os.getenv("XDG_CONFIG_HOME")
+  dir = dir or (os.getenv("HOME") and os.getenv("HOME") .. "/.config")
+  dir = dir or "/etc"
+  options = {
+    require_hostname_validation = true,
+    unique_identifier = "pmcli-" .. PMCLI_VERSION .. "-" .. (function()
+      local f = io.popen("/bin/hostname")
+      local hostname = f:read("*a") or "dummy"
+      f:close()
+      hostname = string.gsub(hostname, "\n$", "")
+      return hostname
+    end)()
+  }
+  local ok, e = pcall(dofile, dir .. "/pmcli_config.lua")
+  if not ok then
+    print(e)
+    print("Please generate a config file as " .. dir .. "/pmcli_config.lua as instructed on GitHub.")
+    os.exit()
+  end
+  return options
+end
+local options = parse_config()
 
 
 -- if we need to step around mismatched hostnames from the certificate
@@ -32,23 +54,25 @@ function setup_ssl_context(require_hostname_validation)
   http_tls.has_hostname_validation = require_hostname_validation
   return http_tls.new_client_context()
 end
-local ssl_context = setup_ssl_context(REQUIRE_HOSTNAME_VALIDATION)
+local ssl_context = setup_ssl_context(options.require_hostname_validation)
 
 
 -- headers for auth access
-function setup_headers(headers, token)
-  headers:append("X-Plex-Client-Identifier", UNIQUE_IDENTIFIER)
+function setup_headers(headers)
+  headers:append("X-Plex-Client-Identifier", options.unique_identifier)
   headers:append("X-Plex-Product", "PMCLI")
   headers:append("X-Plex-Version", PMCLI_VERSION)
-  headers:append("X-Plex-Token", token, true)
+  headers:append("X-Plex-Token", options.plex_token, true)
 end
+-- ===========================
 
 
+-- ========== FUNCTIONS ==========
 function plex_request(suffix, file)
 -- TODO: error handling
-  local request = http_request.new_from_uri(BASE_ADDR .. suffix)
+  local request = http_request.new_from_uri(options.base_addr .. suffix)
   request.ctx = ssl_context
-  setup_headers(request.headers, PLEX_TOKEN)
+  setup_headers(request.headers)
   local headers, stream = request:go()
   return file and stream:save_body_to_file(file) or stream:get_body_as_string()
 end
@@ -66,7 +90,7 @@ end
 function get_menu_items()
   local items = {}
   for child_name, child in pairs(handler.root.MediaContainer) do
-    for i,item in pairs(child) do
+    for _,item in pairs(child) do
       if item._attr and item._attr.title then
         item._tag = child_name
         items[#items + 1] = item
@@ -114,6 +138,7 @@ end
 function read_commands()
 -- well formed string: 2,3-12,14,16,18-20 etc (, and - where - has precedence)
 -- TODO: replace this embarrassing mess for something that can properly error on malformed strings
+-- maybe use LPeg
   local commands = {}
   local iter = {}
   local n
@@ -164,9 +189,11 @@ function open_menu(key, is_root)
     end
   end
 end
+-- ===============================
 
 
--- ===== MAIN BODY STARTS HERE =====
+-- ========== MAIN BODY ==========
 print("Plex Media CLIent v" ..  PMCLI_VERSION .. "\n")
 open_menu("/library/sections", true)
 print("Bye!")
+-- ===============================
