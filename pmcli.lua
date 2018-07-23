@@ -59,31 +59,27 @@ local ssl_context = setup_ssl_context(options.require_hostname_validation)
 
 -- headers for auth access
 function setup_headers(headers)
-  headers:append("X-Plex-Client-Identifier", options.unique_identifier)
-  headers:append("X-Plex-Product", "PMCLI")
-  headers:append("X-Plex-Version", PMCLI_VERSION)
+  --headers:append("X-Plex-Client-Identifier", options.unique_identifier)
+  --headers:append("X-Plex-Product", "PMCLI")
+  --headers:append("X-Plex-Version", PMCLI_VERSION)
   headers:append("X-Plex-Token", options.plex_token, true)
 end
 -- ===========================
 
 
 -- ========== FUNCTIONS ==========
-function plex_request(suffix, file)
+function plex_request(suffix)
 -- TODO: error handling
   local request = http_request.new_from_uri(options.base_addr .. suffix)
   request.ctx = ssl_context
   setup_headers(request.headers)
   local headers, stream = request:go()
-  return file and stream:save_body_to_file(file) or stream:get_body_as_string()
+  return stream:get_body_as_string()
 end
 
 
 function play_media(suffix)
-  local tmp_filename = os.tmpname();
-  local tmp_file = io.open(tmp_filename, "w+b")
-  plex_request(suffix, tmp_file)
-  os.execute("mpv " ..  tmp_filename)
-  os.remove(tmp_filename)
+  os.execute("mpv " ..  options.base_addr .. suffix .. "?X-Plex-Token=" .. options.plex_token)
 end
 
 
