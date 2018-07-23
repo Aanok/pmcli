@@ -22,7 +22,7 @@ local parser = xml2lua.parser(handler)
 
 -- ========== SETUP ==========
 -- config file shenanigans
-function parse_config()
+local options = (function ()
   local dir = os.getenv("XDG_CONFIG_HOME")
   dir = dir or (os.getenv("HOME") and os.getenv("HOME") .. "/.config")
   dir = dir or "/etc"
@@ -43,18 +43,16 @@ function parse_config()
     os.exit()
   end
   return options
-end
-local options = parse_config()
+end)()
 
 
 -- if we need to step around mismatched hostnames from the certificate
 -- function to setup keeping a clean environment
-function setup_ssl_context(require_hostname_validation)
+local ssl_context = (function()
   local http_tls = require("http.tls")
-  http_tls.has_hostname_validation = require_hostname_validation
+  http_tls.has_hostname_validation = options.require_hostname_validation
   return http_tls.new_client_context()
-end
-local ssl_context = setup_ssl_context(options.require_hostname_validation)
+end)()
 
 
 -- headers for auth access
