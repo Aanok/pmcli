@@ -12,12 +12,14 @@ dependencies = {
    "lua >= 5.1",
    "http",
    "xml2lua",
-   "html-entities"
+   "html-entities",
+   "lpeg"
 }
 build = {
    type = "builtin",
    modules = {
-      ["pmcli.client"] = "src/client.lua"
+      ["pmcli.client"] = "src/client.lua",
+      ["pmcli.utils"] = "src/utils.lua"
    },
    install = {
     bin = {

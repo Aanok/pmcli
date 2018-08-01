@@ -2,6 +2,7 @@
 local pmcli = {}
 
 -- class
+-- we init some "static" values
 local PMCLI = {
   VERSION = "0.1",
   HANDLER_OPTS = { noreduce = { Directory = true, Track = true, Video = true }}
@@ -16,6 +17,9 @@ local html_entities = require("htmlEntities")
 
 -- xml parsing
 local xml2lua = require("xml2lua")
+
+-- our own utils
+local utils = require("pmcli.utils")
 -- ==============================
 
 
@@ -25,24 +29,8 @@ function pmcli.new()
   local self = {}
   setmetatable(self, { __index = PMCLI })
   
-  -- CONFIG FILE -- TODO: improve with .ini-like syntax and readwrite capabilities
-  local config_dir = os.getenv("XDG_CONFIG_HOME")
-  config_dir = config_dir or (os.getenv("HOME") and os.getenv("HOME") .. "/.config")
-  config_dir = config_dir or "/etc"
-  -- setup defaults
-  self.options = {
-      require_hostname_validation = true,
-      unique_identifier = "temp_dummy" -- FIXME! generate some UUID and write to config file
-    }
-  -- load from file
-  options = {}
-  local ok, e = pcall(dofile, config_dir .. "/pmcli_config.lua")
-  if not ok then
-    print(e)
-    print("Please generate a config file as " .. config_dir .. "/pmcli_config.lua as instructed on GitHub.")
-    os.exit()
-  end
-  self.options = options
+  -- setup options from config file
+  self.options = utils.get_config()
   
   -- if we need to step around mismatched hostnames from the certificate
   local http_tls = require("http.tls")
@@ -80,7 +68,7 @@ end
 
 
 function PMCLI:play_media(suffix)
-  os.execute("mpv --msg-level=cplayer=warn " ..  self.options.base_addr .. suffix .. "?X-Plex-Token=" .. self.options.plex_token)
+  os.execute("mpv " ..  self.options.base_addr .. suffix .. "?X-Plex-Token=" .. self.options.plex_token)
 end
 
 
@@ -132,35 +120,6 @@ local function join_keys(s1, s2)
 end
 
 
-local function read_commands()
--- well formed string: 2,3-12,14,16,18-20 etc (, and - where - has precedence)
--- TODO: replace this embarrassing mess for something that can properly error on malformed strings
--- maybe use LPeg
-  local commands = {}
-  local iter = {}
-  local n
-  local input = io.read()
-  if input ~= nil then
-    if input == "q" then
-      return { "q" }
-    end
-    for ranges in input:gmatch("[^,]+") do
-      if ranges:find("%d+%s*-%s*%d+") then
-        iter = ranges:gmatch("[^-]+")
-        low, high = tonumber(iter()), tonumber(iter())
-        for n = low, high do
-          commands[#commands + 1] = n
-        end
-      else
-        n = ranges:gsub("%s+", "")
-        commands[#commands + 1] = tonumber(n)
-      end
-    end
-  end
-  return commands
-end
-
-
 function PMCLI:open_menu(key, is_root)
 -- TODO: rewrite to avoid recursion (so old handlers can go out of scope and be GC'd)
 -- we'll need a stack of menu keys to know where to backtrack
@@ -172,7 +131,7 @@ function PMCLI:open_menu(key, is_root)
   items = self:get_menu_items()
   while true do
     print_menu(items, is_root)
-    for _,c in ipairs(read_commands()) do
+    for _,c in ipairs(utils.read_commands()) do
       if c == 0 then
         return
       elseif c == "q" then
