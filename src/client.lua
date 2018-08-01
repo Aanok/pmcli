@@ -1,8 +1,11 @@
-#!/usr/bin/env lua
--- TODO: any sort of error handling. Like, at all.
+-- module
+local pmcli = {}
 
-local PMCLI_VERSION = "0.2"
-
+-- class
+local PMCLI = {
+  VERSION = "0.1",
+  HANDLER_OPTS = { noreduce = { Directory = true, Track = true, Video = true }}
+}
 
 -- ========== REQUIRES ==========
 -- lua-http for networking
@@ -13,77 +16,77 @@ local html_entities = require("htmlEntities")
 
 -- xml parsing
 local xml2lua = require("xml2lua")
-local HANDLER_OPTS = { noreduce = { Directory = true, Track = true, Video = true }}
-local handler = require("xmlhandler.tree")
-handler.options = HANDLER_OPTS
-local parser = xml2lua.parser(handler)
 -- ==============================
 
 
 -- ========== SETUP ==========
--- config file shenanigans
-local options = (function ()
-  local dir = os.getenv("XDG_CONFIG_HOME")
-  dir = dir or (os.getenv("HOME") and os.getenv("HOME") .. "/.config")
-  dir = dir or "/etc"
-  options = {
-    require_hostname_validation = true,
-    unique_identifier = "pmcli-" .. PMCLI_VERSION .. "-" .. (function()
-      local f = io.popen("/bin/hostname")
-      local hostname = f:read("*a") or "dummy"
-      f:close()
-      hostname = string.gsub(hostname, "\n$", "")
-      return hostname
-    end)()
-  }
-  local ok, e = pcall(dofile, dir .. "/pmcli_config.lua")
+-- constructor
+function pmcli.new()
+  local self = {}
+  setmetatable(self, { __index = PMCLI })
+  
+  -- CONFIG FILE -- TODO: improve with .ini-like syntax and readwrite capabilities
+  local config_dir = os.getenv("XDG_CONFIG_HOME")
+  config_dir = config_dir or (os.getenv("HOME") and os.getenv("HOME") .. "/.config")
+  config_dir = config_dir or "/etc"
+  -- setup defaults
+  self.options = {
+      require_hostname_validation = true,
+      unique_identifier = "temp_dummy" -- FIXME! generate some UUID and write to config file
+    }
+  -- load from file
+  options = {}
+  local ok, e = pcall(dofile, config_dir .. "/pmcli_config.lua")
   if not ok then
     print(e)
-    print("Please generate a config file as " .. dir .. "/pmcli_config.lua as instructed on GitHub.")
+    print("Please generate a config file as " .. config_dir .. "/pmcli_config.lua as instructed on GitHub.")
     os.exit()
   end
-  return options
-end)()
-
-
--- if we need to step around mismatched hostnames from the certificate
--- function to setup keeping a clean environment
-local ssl_context = (function()
+  self.options = options
+  
+  -- if we need to step around mismatched hostnames from the certificate
   local http_tls = require("http.tls")
-  http_tls.has_hostname_validation = options.require_hostname_validation
-  return http_tls.new_client_context()
-end)()
+  http_tls.has_hostname_validation = self.options.require_hostname_validation
+  self.ssl_context = http_tls.new_client_context()
+  
+  -- xml parsing shenanigans
+  self.handler = require("xmlhandler.tree")
+  self.handler.options = PMCLI.HANDLER_OPTS
+  self.parser = xml2lua.parser(handler)
+  
+  return self
+end
 
 
 -- headers for auth access
-function setup_headers(headers)
+function PMCLI:setup_headers(headers)
   --headers:append("X-Plex-Client-Identifier", options.unique_identifier)
   --headers:append("X-Plex-Product", "PMCLI")
   --headers:append("X-Plex-Version", PMCLI_VERSION)
-  headers:append("X-Plex-Token", options.plex_token, true)
+  headers:append("X-Plex-Token", self.options.plex_token, true)
 end
 -- ===========================
 
 
 -- ========== FUNCTIONS ==========
-function plex_request(suffix)
+function PMCLI:plex_request(suffix)
 -- TODO: error handling
   local request = http_request.new_from_uri(options.base_addr .. suffix)
   request.ctx = ssl_context
-  setup_headers(request.headers)
+  self:setup_headers(request.headers)
   local headers, stream = request:go()
   return stream:get_body_as_string()
 end
 
 
-function play_media(suffix)
-  os.execute("mpv " ..  options.base_addr .. suffix .. "?X-Plex-Token=" .. options.plex_token)
+function PMCLI:play_media(suffix)
+  os.execute("mpv --msg-level=cplayer=warn " ..  self.options.base_addr .. suffix .. "?X-Plex-Token=" .. self.options.plex_token)
 end
 
 
-function get_menu_items()
+function PMCLI:get_menu_items()
   local items = {}
-  for child_name, child in pairs(handler.root.MediaContainer) do
+  for child_name, child in pairs(self.handler.root.MediaContainer) do
     for _,item in pairs(child) do
       if item._attr and item._attr.title then
         item._tag = child_name
@@ -91,12 +94,12 @@ function get_menu_items()
       end
     end
   end
-  items._menu_title = handler.root.MediaContainer._attr.title1
+  items._menu_title = self.handler.root.MediaContainer._attr.title1
   return items
 end
 
 
-function print_menu(items, is_root)
+local function print_menu(items, is_root)
   print("=== " .. html_entities.decode(items._menu_title) .. " ===")
   print(is_root and "0: quit" or "0: ..")
   for i,item in ipairs(items) do
@@ -105,7 +108,7 @@ function print_menu(items, is_root)
 end
 
 
-function join_keys(s1, s2)
+local function join_keys(s1, s2)
   local i = 0
   local match_length = -1
   -- preprocessing: remove leading /
@@ -129,7 +132,7 @@ function join_keys(s1, s2)
 end
 
 
-function read_commands()
+local function read_commands()
 -- well formed string: 2,3-12,14,16,18-20 etc (, and - where - has precedence)
 -- TODO: replace this embarrassing mess for something that can properly error on malformed strings
 -- maybe use LPeg
@@ -158,15 +161,15 @@ function read_commands()
 end
 
 
-function open_menu(key, is_root)
+function PMCLI:open_menu(key, is_root)
 -- TODO: rewrite to avoid recursion (so old handlers can go out of scope and be GC'd)
 -- we'll need a stack of menu keys to know where to backtrack
   local items
-  handler = handler:new()
-  handler.options = HANDLER_OPTS
-  parser = xml2lua.parser(handler)
-  parser:parse(plex_request(key))
-  items = get_menu_items()
+  self.handler = self.handler:new()
+  self.handler.options = HANDLER_OPTS
+  self.parser = xml2lua.parser(self.handler)
+  self.parser:parse(self:plex_request(key))
+  items = self:get_menu_items()
   while true do
     print_menu(items, is_root)
     for _,c in ipairs(read_commands()) do
@@ -176,9 +179,9 @@ function open_menu(key, is_root)
         print("Bye!")
         os.exit()
       elseif items[c]._tag == "Directory" then
-        open_menu(join_keys(key, items[c]._attr.key), false)
+        self:open_menu(join_keys(key, items[c]._attr.key), false)
       elseif items[c]._tag == "Video" or items[c]._tag == "Track" then
-        play_media(join_keys(key, items[c].Media.Part._attr.key))
+        self:play_media(join_keys(key, items[c].Media.Part._attr.key))
       end
     end
   end
@@ -186,8 +189,11 @@ end
 -- ===============================
 
 
--- ========== MAIN BODY ==========
-print("Plex Media CLIent v" ..  PMCLI_VERSION .. "\n")
-open_menu("/library/sections", true)
-print("Bye!")
--- ===============================
+function PMCLI:run()
+  print("Plex Media CLIent v" ..  self.VERSION .. "\n")
+  self:open_menu("/library/sections", true)
+  print("Bye!")
+end
+
+
+return pmcli

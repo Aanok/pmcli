@@ -3,22 +3,21 @@
 
 ## Dependencies
 * Lua >= 5.1 (LuaJIT too, although there is no reason to use it)
-* `luarocks install http`
-* `luarocks install xml2lua`
-* `luarocks install html-entities`
+* `[lua-http](https://github.com/daurnimator/lua-http)`
+* `[xml2lua](https://github.com/manoelcampos/Xml2Lua)`
+* `[htmlEntities for Lua](https://github.com/TiagoDanin/htmlEntities-for-lua)`
 * `mpv` must be in PATH.
 
+Please note Lua dependencies are pulled automatically by luarocks but mpv must be manually installed.
+
 ## Installation
-```
-git clone https://github.com/Aanok/pmcli.git
-sudo make install
-```
+`luarocks install`
 
 ### Uninstallation
-`sudo make uninstall`
+`luarocks remove pmcli`
 
 ## Usage
-First we need to recover a valid authorization token. Maybe in the future PMCLI will provide its own authentication, but not for the moment.
+First we need to recover a valid authorization token. In the future PMCLI will provide its own authentication, but not for the moment.
 1. Launch Plex from a web browser (through app.plex.tv or directly, it doesn't matter).
 2. Open the Developer Tools: on Firefox and Chromiums you can press F12.
 3. Go to Local Storage > your current page and look for "myPlexAccessToken" and copy the contents.
