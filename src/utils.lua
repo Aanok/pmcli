@@ -65,7 +65,7 @@ function utils.read_config_line(line)
   -- comments
   if string.match(line, '^#') then return nil end
   -- proper lines
-  local key, value = string.match(line,'^%s-([^=%s]+)%s-=%s-([^=%s]+)%s-$')
+  local key, value = string.match(line,'^%s-([^=%s]+)%s-=%s-([^%s]+)%s-$')
   -- recognize booleans
   if value == "true" then
     value = true
