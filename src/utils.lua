@@ -15,7 +15,7 @@ function utils.expand_range(left, right)
 end
 
 
-function utils.flatten(t, foo)
+function utils.flatten(t)
   if type(t) ~= "table" then return { t } end
   local flat = {}
   for _,v1 in ipairs(t) do
@@ -44,7 +44,7 @@ utils.command_list = lpeg.Ct({
   R = lpeg.V("n") * lpeg.V("dash") * lpeg.V("n") / utils.expand_range,
   dash = lpeg.V("ws") * lpeg.P("-"),
   n = lpeg.V("ws") * (lpeg.R("09")^1 / tonumber),
-  ws = lpeg.P(lpeg.S(" \t\r\n")^0)
+  ws = lpeg.P(lpeg.locale().space^0)
 }) / utils.flatten
 
 
@@ -61,24 +61,46 @@ end
 
 
 -- ========== CONFIG FILE ===========
+function utils.read_config_line(line)
+  -- comments
+  if string.match(line, '^#') then return nil end
+  -- proper lines
+  local key, value = string.match(line,'^%s-([^=%s]+)%s-=%s-([^=%s]+)%s-$')
+  -- recognize booleans
+  if value == "true" then
+    value = true
+  elseif value == "false" then
+    value= false
+  end
+  return key, value
+end
+
+
 function utils.get_config()
   -- figure out configuration file directory
   local dir = os.getenv("XDG_CONFIG_HOME")
   dir = dir or (os.getenv("HOME") and os.getenv("HOME") .. "/.config")
-  dir = dir or "/etc"
   
-  -- defaults; global for the sake of the config file. gonna get changed soon.
-  options = {
+  -- defaults
+  local options = {
       require_hostname_validation = true,
       unique_identifier = "temp_dummy" -- FIXME! generate some UUID and write to config file
     }
+    
   -- load from file
-  local ok, e = pcall(dofile, dir .. "/pmcli_config.lua")
-  if not ok then
+  local file, e = io.open( dir .. "/pmcli_config")
+  if not file then
     print(e)
-    print("Please generate a config file as " .. dir .. "/pmcli_config.lua as instructed on GitHub.")
+    print("Please generate config file " .. dir .. "/pmcli_config as instructed on GitHub.")
     os.exit()
   end
+  
+  for line in file:lines() do
+    local key, value = utils.read_config_line(line)
+    if key ~= nil and value ~= nil then options[key] = value end
+  end
+  
+  file:close()
   
   return options
 end

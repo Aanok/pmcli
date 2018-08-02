@@ -11,7 +11,7 @@
 Please note Lua dependencies are pulled automatically by luarocks but mpv must be manually installed.
 
 ## Installation
-`luarocks install`
+`luarocks make`
 
 ### Uninstallation
 `luarocks remove pmcli`
@@ -24,16 +24,16 @@ First we need to recover a valid authorization token. In the future PMCLI will p
 
 ![token get](https://i.imgur.com/cnt8m55.png)
 
-Create a file called `pmcli_config.lua` in your `$XDG_CONFIG_HOME` (or `$HOME/.config` if that is not set). Make sure to `chmod 600 pmcli_config.lua`.
+Create a file called `pmcli_config` in your `$XDG_CONFIG_HOME` (or `$HOME/.config` if that is not set). You might want to `chmod 600 pmcli_config`.
 
 Fill the file as follows:
 ```
-options.plex_token = "the_token"
-options.base_addr = "plex_server_address:port"
+plex_token = the_token
+base_addr = plex_server_address:port
 ```
 
-Please mind the quotes, those need to be strings. The address should look something like `https://example.com:32400`.
-Additionally, you might add `options.require_hostname_validation = false` if the address listed on your webserver's certificate isn't the same your Plex Media Server's (e.g. if you redirect to a local address).
+*Do not* wrap strings in quotes, just write them down. The address should look something like `https://example.com:32400`.
+Additionally, you might add `require_hostname_validation = false` if the address listed on your webserver's certificate isn't the same your Plex Media Server's (e.g. if you redirect to a local address).
 
 You can launch the client as simply `pmcli`. Navigation should be straightforward; mind that you can express command ranges as `n1-n2`, command sequences as `s1,s2` and can always submit `q` to quit immediately.
 

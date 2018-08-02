@@ -31,6 +31,7 @@ function pmcli.new()
   
   -- setup options from config file
   self.options = utils.get_config()
+  require("pl.pretty").dump(self.options)
   
   -- if we need to step around mismatched hostnames from the certificate
   local http_tls = require("http.tls")
@@ -59,10 +60,11 @@ end
 -- ========== FUNCTIONS ==========
 function PMCLI:plex_request(suffix)
 -- TODO: error handling
-  local request = http_request.new_from_uri(options.base_addr .. suffix)
+  local request = http_request.new_from_uri(self.options.base_addr .. suffix)
   request.ctx = ssl_context
   self:setup_headers(request.headers)
   local headers, stream = request:go()
+  print(headers, stream)
   return stream:get_body_as_string()
 end
 
