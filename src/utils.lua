@@ -60,8 +60,65 @@ end
 -- =====================================
 
 
+-- ========== MISCELLANEOUS ==========
+function utils.generate_random_id()
+  -- string of 32 random digits
+  math.randomseed(os.time())
+  local id = ""
+  for i = 1,32 do
+    id = id .. math.random(0,9)
+  end
+  return id
+end
+
+
+function utils.read_utf8_char(file)
+  local len = 1
+  local char = file:read(1)
+  if not char then return nil end
+  local first_byte = string.byte(char)
+  while (first_byte >= 192) do -- first two bits are 11
+    first_byte = (first_byte * 2) % 2^8 -- shift left one bit
+    len = len + 1
+    char = char .. file:read(1)
+  end
+  return char, len
+end
+
+
+function utils.read_password()
+  local pass = ""
+  local len = 0
+  local prev_len, ch
+  os.execute("stty -echo raw")
+  repeat
+    prev_len = len
+    ch, len = utils.read_utf8_char(io.stdin)
+    if ch == "\127" then -- backspace
+      io.stdout:write("\b \b") -- go back, write whitespace, go back again
+      io.stdout:flush()
+      pass = pass:sub(1, -1 -prev_len) -- eat last character, which could be multiple bytes
+    elseif ch == "\n" or ch == "\r" then -- EOL
+      io.stdout:write("\n\r") -- accept EOL as end of string
+      io.stdout:flush()
+    elseif not ch then -- some IO error has occurred
+      os.execute("stty echo cooked")
+      print("[!!!] Error while reading character from stdin.")
+      os.exit(1)
+    else -- valid character. mind it's a... wide definition of valid. like, Meta+F1 is valid.
+      io.stdout:write("*")
+      io.stdout:flush()
+      pass = pass .. ch
+    end
+  until ch == '\n' or ch == '\r'
+  os.execute("stty echo cooked")
+  return pass
+end
+-- ===================================
+
+
 -- ========== CONFIG FILE ===========
-function utils.read_config_line(line)
+function utils.parse_config_line(line)
   -- comments
   if string.match(line, '^#') then return nil end
   -- proper lines
@@ -76,32 +133,45 @@ function utils.read_config_line(line)
 end
 
 
-function utils.get_config()
-  -- figure out configuration file directory
+function utils.get_config_absolute_filename()
   local dir = os.getenv("XDG_CONFIG_HOME")
   dir = dir or (os.getenv("HOME") and os.getenv("HOME") .. "/.config")
-  
+  return dir .. "/pmcli_config"
+end
+
+
+function utils.write_config(options)
+  local file, e = io.open(utils.get_config_absolute_filename(), "w")
+  if not file then
+    print("[!] Error committing configuration to config file.")
+    print(e)
+    os.exit(1)
+  end
+  for k,v in pairs(options) do
+    file:write(tostring(k) .. " = " .. tostring(v) .. "\n")
+  end
+end
+
+
+function utils.get_config()
   -- defaults
   local options = {
-      require_hostname_validation = true,
-      unique_identifier = "temp_dummy" -- FIXME! generate some UUID and write to config file
-    }
+    require_hostname_validation = true
+  }
     
-  -- load from file
-  local file, e = io.open( dir .. "/pmcli_config")
-  if not file then
-    print(e)
-    print("Please generate config file " .. dir .. "/pmcli_config as instructed on GitHub.")
-    os.exit()
+  -- open file
+  local file = io.open(utils.get_config_absolute_filename())
+  if not file then -- config file not found
+    return nil
   end
   
+  -- parse file
   for line in file:lines() do
-    local key, value = utils.read_config_line(line)
+    local key, value = utils.parse_config_line(line)
     if key ~= nil and value ~= nil then options[key] = value end
   end
-  
-  file:close()
-  
+
+  file:close()  
   return options
 end
 -- ==================================

@@ -26,22 +26,23 @@ local utils = require("pmcli.utils")
 -- ========== SETUP ==========
 -- constructor
 function pmcli.new()
+  print("Plex Media CLIent v" ..  PMCLI.VERSION .. "\n")
   local self = {}
   setmetatable(self, { __index = PMCLI })
-  
-  -- setup options from config file
-  self.options = utils.get_config()
-  require("pl.pretty").dump(self.options)
-  
-  -- if we need to step around mismatched hostnames from the certificate
-  local http_tls = require("http.tls")
-  http_tls.has_hostname_validation = self.options.require_hostname_validation
-  self.ssl_context = http_tls.new_client_context()
   
   -- xml parsing shenanigans
   self.handler = require("xmlhandler.tree")
   self.handler.options = PMCLI.HANDLER_OPTS
   self.parser = xml2lua.parser(handler)
+  
+  -- setup options from config file
+  -- or, alternatively, ask user and login
+  self.options = utils.get_config() or self:first_time_config()
+  
+  -- if we need to step around mismatched hostnames from the certificate
+  local http_tls = require("http.tls")
+  http_tls.has_hostname_validation = self.options.require_hostname_validation
+  self.ssl_context = http_tls.new_client_context()
   
   return self
 end
@@ -49,10 +50,70 @@ end
 
 -- headers for auth access
 function PMCLI:setup_headers(headers)
-  --headers:append("X-Plex-Client-Identifier", options.unique_identifier)
-  --headers:append("X-Plex-Product", "PMCLI")
-  --headers:append("X-Plex-Version", PMCLI_VERSION)
+  headers:append("X-Plex-Client-Identifier", self.options.unique_identifier)
+  headers:append("X-Plex-Product", "PMCLI")
+  headers:append("X-Plex-Version", PMCLI.VERSION)
   headers:append("X-Plex-Token", self.options.plex_token, true)
+end
+
+
+function PMCLI:first_time_config()
+  local yn
+  print("Configuration file not found. Would you like to proceed with configuration and login? [y/n]")
+  repeat
+    yn = io.read()
+  until yn == "y" or yn == "n"
+  if yn == "n" then
+    print("Bye!")
+    os.exit()
+  end
+  
+  local options = {}
+  
+  options.unique_identifier = "pmcli-" .. PMCLI.VERSION .. "-" .. utils.generate_random_id()
+  
+  print("Please enter an address and port to access your Plex Media Server. It should look like https://example.com:32400 .")
+  options.base_addr = io.read()
+  
+  print("Please enter your Plex account name or email.")
+  local login = io.read()
+  print("Please enter your Plex account password.")
+  local password = utils.read_password()
+  options.plex_token = self:request_token(login, password, options.unique_identifier)
+  -- delete password from process memory as soon as possible
+  password = nil
+  collectgarbage()
+  
+  print("Do you need PMCLI to ignore hostname validation (must e.g. if PMS under different local address)? [y/n]")
+  repeat
+    yn = io.read()
+  until yn == "y" or yn == "n"
+  options.require_hostname_validation = yn == "n"
+  
+  print("Configuration complete.\n")
+  
+  utils.write_config(options)
+  return options
+end
+
+
+-- token request
+function PMCLI:request_token(login, pass, id)
+  -- FIXME: only works for ASCII alphanumeric passwords!
+  local request = http_request.new_from_uri("https://plex.tv/users/sign_in.xml")
+  request.headers:append("X-Plex-Client-Identifier", id)
+  request.headers:append("X-Plex-Product", "PMCLI")
+  request.headers:append("X-Plex-Version", PMCLI.VERSION)
+  request.headers:delete(":method")
+  request.headers:append(":method", "POST")
+  request.headers:append("Content-Type", "application/x-www-form-urlencoded")
+  request:set_body("user[login]=" .. login .. "&user[password]=" .. pass)
+  local headers, stream = request:go()
+  self.handler = self.handler:new()
+  self.handler.options = PMCLI.HANDLER_OPTS
+  self.parser = xml2lua.parser(self.handler)
+  self.parser:parse(stream:get_body_as_string())
+  return self.handler.root.user._attr.authenticationToken
 end
 -- ===========================
 
@@ -64,7 +125,6 @@ function PMCLI:plex_request(suffix)
   request.ctx = ssl_context
   self:setup_headers(request.headers)
   local headers, stream = request:go()
-  print(headers, stream)
   return stream:get_body_as_string()
 end
 
@@ -127,7 +187,7 @@ function PMCLI:open_menu(key, is_root)
 -- we'll need a stack of menu keys to know where to backtrack
   local items
   self.handler = self.handler:new()
-  self.handler.options = HANDLER_OPTS
+  self.handler.options = PMCLI.HANDLER_OPTS
   self.parser = xml2lua.parser(self.handler)
   self.parser:parse(self:plex_request(key))
   items = self:get_menu_items()
@@ -151,7 +211,6 @@ end
 
 
 function PMCLI:run()
-  print("Plex Media CLIent v" ..  self.VERSION .. "\n")
   self:open_menu("/library/sections", true)
   print("Bye!")
 end
