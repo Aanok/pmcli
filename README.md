@@ -11,7 +11,7 @@
 Please note Lua dependencies are pulled automatically by luarocks but mpv must be manually installed.
 
 ## Installation
-`luarocks make`
+`luarocks install --server=http://luarocks.org/dev pmcli`
 
 ### Uninstallation
 `luarocks remove pmcli`
