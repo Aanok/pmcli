@@ -1,7 +1,7 @@
 package = "pmcli"
 version = "scm-0"
 source = {
-   url = "https://github.com/Aanok/pmcli.git"
+   url = "git://github.com/Aanok/pmcli"
 }
 description = {
    summary = "Command line client for Plex Media Server",
