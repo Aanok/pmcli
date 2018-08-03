@@ -26,7 +26,7 @@ local utils = require("pmcli.utils")
 -- ========== SETUP ==========
 -- constructor
 function pmcli.new()
-  print("Plex Media CLIent v" ..  PMCLI.VERSION .. "\n")
+  io.stdout:write("Plex Media CLIent v" ..  PMCLI.VERSION .. "\n")
   local self = {}
   setmetatable(self, { __index = PMCLI })
   
@@ -58,13 +58,8 @@ end
 
 
 function PMCLI:first_time_config()
-  local yn
-  print("Configuration file not found. Would you like to proceed with configuration and login? [y/n]")
-  repeat
-    yn = io.read()
-  until yn == "y" or yn == "n"
-  if yn == "n" then
-    print("Bye!")
+  if not self:confirm_yn("\nConfiguration file not found. Would you like to proceed with configuration and login?") then
+    io.stdout:write("Bye!\n")
     os.exit()
   end
   
@@ -72,34 +67,47 @@ function PMCLI:first_time_config()
   
   options.unique_identifier = "pmcli-" .. PMCLI.VERSION .. "-" .. utils.generate_random_id()
   
-  print("Please enter an address and port to access your Plex Media Server. It should look like https://example.com:32400 .")
-  options.base_addr = io.read()
+  local uri_patt = require("lpeg_patterns.uri").uri * -1
+  io.stdout:write("\nPlease enter an address (and port if not default) to access your Plex Media Server.\nIt should look like https://example.com:32400 .\n")
+  repeat
+    options.base_addr = io.read()
+    if not uri_patt:match(options.base_addr) then
+      io.stderr:write("[!] Malformed URI. Please try again.\n")
+    end
+  until uri_patt:match(options.base_addr)
   
-  print("Please enter your Plex account name or email.")
-  local login = io.read()
-  print("Please enter your Plex account password.")
-  local password = utils.read_password()
-  options.plex_token = self:request_token(login, password, options.unique_identifier)
+  repeat 
+    io.stdout:write("\nPlease enter your Plex account name or email.\n")
+    local login = io.read()
+    io.stdout:write("\nPlease enter your Plex account password.\n")
+    local password = utils.read_password()
+    local errmsg
+    options.plex_token, errmsg = self:request_token(login, password, options.unique_identifier)
+    if not options.plex_token then
+      io.stderr:write("[!!] Authentication error: ", errmsg .. "\n")
+      if not self:confirm_yn("Would you like to try again with new credentials?") then
+        io.stdout:write("Bye!\n")
+        os.exit(1)
+      end
+    end
+  until options.plex_token
   -- delete password from process memory as soon as possible
   password = nil
   collectgarbage()
   
-  print("Do you need PMCLI to ignore hostname validation (must e.g. if PMS under different local address)? [y/n]")
-  repeat
-    yn = io.read()
-  until yn == "y" or yn == "n"
-  options.require_hostname_validation = yn == "n"
+  options.require_hostname_validation = not self:confirm_yn("\nDo you need PMCLI to ignore hostname validation (must e.g. if PMS under different local address)?")
   
-  print("Configuration complete.\n")
-  
+  io.stdout:write("\nCommitting configuration to disk...\n")
   utils.write_config(options)
+  
+  io.stdout:write("Connecting to Plex Server...\n")
   return options
 end
 
 
 -- token request
 function PMCLI:request_token(login, pass, id)
-  -- FIXME: only works for ASCII alphanumeric passwords!
+  local escape = require("socket.url").escape
   local request = http_request.new_from_uri("https://plex.tv/users/sign_in.xml")
   request.headers:append("X-Plex-Client-Identifier", id)
   request.headers:append("X-Plex-Product", "PMCLI")
@@ -107,24 +115,46 @@ function PMCLI:request_token(login, pass, id)
   request.headers:delete(":method")
   request.headers:append(":method", "POST")
   request.headers:append("Content-Type", "application/x-www-form-urlencoded")
-  request:set_body("user[login]=" .. login .. "&user[password]=" .. pass)
+  request:set_body("user%5blogin%5d=" .. escape(login) .. "&user%5bpassword%5d=" .. escape(pass))
   local headers, stream = request:go()
+  if not headers then
+    io.stderr:write("[!!!] Network error on token request: " .. stream ..  "\n")
+    os.exit(1)
+  end
   self.handler = self.handler:new()
   self.handler.options = PMCLI.HANDLER_OPTS
   self.parser = xml2lua.parser(self.handler)
   self.parser:parse(stream:get_body_as_string())
-  return self.handler.root.user._attr.authenticationToken
+  if self.handler.root.errors then
+    return nil, self.handler.root.errors.error
+  else
+    return self.handler.root.user._attr.authenticationToken
+  end
 end
 -- ===========================
 
 
 -- ========== FUNCTIONS ==========
+-- conveniency for simple y/n confirmation dialogs
+function PMCLI:confirm_yn(msg)
+  io.stdout:write(msg .. " [y/n]\n")
+  repeat
+    yn = io.read()
+  until yn == "y" or yn == "n"
+  return yn == "y"
+end
+
+
 function PMCLI:plex_request(suffix)
--- TODO: error handling
+-- TODO: better error handling
   local request = http_request.new_from_uri(self.options.base_addr .. suffix)
   request.ctx = ssl_context
   self:setup_headers(request.headers)
   local headers, stream = request:go()
+  if not headers then
+    io.stderr:write("[!!!] Network error on API request " .. self.options.base_addr .. suffix .. ": " .. stream ..  "\n")
+    os.exit(1)
+  end
   return stream:get_body_as_string()
 end
 
@@ -150,10 +180,10 @@ end
 
 
 local function print_menu(items, is_root)
-  print("=== " .. html_entities.decode(items._menu_title) .. " ===")
-  print(is_root and "0: quit" or "0: ..")
+  io.stdout:write("\n=== " .. html_entities.decode(items._menu_title) .. " ===\n")
+  io.stdout:write(is_root and "0: quit\n" or "0: ..\n")
   for i,item in ipairs(items) do
-    print(item._tag:sub(1,1) .. " " .. i .. ": " .. html_entities.decode(item._attr.title))
+    io.stdout:write(item._tag:sub(1,1) .. " " .. i .. ": " .. html_entities.decode(item._attr.title) .. "\n")
   end
 end
 
@@ -197,7 +227,7 @@ function PMCLI:open_menu(key, is_root)
       if c == 0 then
         return
       elseif c == "q" then
-        print("Bye!")
+        io.stdout:write("Bye!\n")
         os.exit()
       elseif items[c]._tag == "Directory" then
         self:open_menu(join_keys(key, items[c]._attr.key), false)
@@ -212,7 +242,7 @@ end
 
 function PMCLI:run()
   self:open_menu("/library/sections", true)
-  print("Bye!")
+  io.stdout:write("Bye!\n")
 end
 
 
