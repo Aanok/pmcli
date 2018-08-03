@@ -4,14 +4,14 @@
 ## Dependencies
 * Lua >= 5.1 (LuaJIT too, although there is no reason to use it)
 * [lua-http](https://github.com/daurnimator/lua-http)
-* [xml2lua](https://github.com/manoelcampos/Xml2Lua)
+* [dkjson](https://github.com/LuaDist/dkjson)
 * [htmlEntities for Lua](https://github.com/TiagoDanin/htmlEntities-for-lua)
 * `mpv` must be in PATH.
 
 Please note Lua dependencies are pulled automatically by luarocks but mpv must be manually installed.
 
 ## Installation
-`luarocks make`
+`luarocks install --server=http://luarocks.org/dev pmcli`
 
 ### Uninstallation
 `luarocks remove pmcli`
