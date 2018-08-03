@@ -156,7 +156,8 @@ end
 function utils.get_config()
   -- defaults
   local options = {
-    require_hostname_validation = true
+    require_hostname_validation = true,
+    unique_identifier = "pmcli-dummy"
   }
     
   -- open file

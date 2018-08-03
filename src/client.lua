@@ -4,8 +4,7 @@ local pmcli = {}
 -- class
 -- we init some "static" values
 local PMCLI = {
-  VERSION = "0.1",
-  HANDLER_OPTS = { noreduce = { Directory = true, Track = true, Video = true }}
+  VERSION = "0.1"
 }
 
 -- ========== REQUIRES ==========
@@ -15,8 +14,8 @@ local http_request = require("http.request")
 -- html entities (escape sequences)
 local html_entities = require("htmlEntities")
 
--- xml parsing
-local xml2lua = require("xml2lua")
+-- JSON parsing
+local json = require("dkjson").use_lpeg()
 
 -- our own utils
 local utils = require("pmcli.utils")
@@ -29,11 +28,6 @@ function pmcli.new()
   io.stdout:write("Plex Media CLIent v" ..  PMCLI.VERSION .. "\n")
   local self = {}
   setmetatable(self, { __index = PMCLI })
-  
-  -- xml parsing shenanigans
-  self.handler = require("xmlhandler.tree")
-  self.handler.options = PMCLI.HANDLER_OPTS
-  self.parser = xml2lua.parser(handler)
   
   -- setup options from config file
   -- or, alternatively, ask user and login
@@ -54,11 +48,12 @@ function PMCLI:setup_headers(headers)
   headers:append("X-Plex-Product", "PMCLI")
   headers:append("X-Plex-Version", PMCLI.VERSION)
   headers:append("X-Plex-Token", self.options.plex_token, true)
+  headers:append("Accept", "application/json")
 end
 
 
 function PMCLI:first_time_config()
-  if not self:confirm_yn("\nConfiguration file not found. Would you like to proceed with configuration and login?") then
+  if not confirm_yn("\nConfiguration file not found. Would you like to proceed with configuration and login?") then
     io.stdout:write("Bye!\n")
     os.exit()
   end
@@ -85,7 +80,7 @@ function PMCLI:first_time_config()
     options.plex_token, errmsg = self:request_token(login, password, options.unique_identifier)
     if not options.plex_token then
       io.stderr:write("[!!] Authentication error: ", errmsg .. "\n")
-      if not self:confirm_yn("Would you like to try again with new credentials?") then
+      if not confirm_yn("Would you like to try again with new credentials?") then
         io.stdout:write("Bye!\n")
         os.exit(1)
       end
@@ -95,7 +90,7 @@ function PMCLI:first_time_config()
   password = nil
   collectgarbage()
   
-  options.require_hostname_validation = not self:confirm_yn("\nDo you need PMCLI to ignore hostname validation (must e.g. if PMS under different local address)?")
+  options.require_hostname_validation = not confirm_yn("\nDo you need PMCLI to ignore hostname validation (must e.g. if PMS under different local address)?")
   
   io.stdout:write("\nCommitting configuration to disk...\n")
   utils.write_config(options)
@@ -108,27 +103,25 @@ end
 -- token request
 function PMCLI:request_token(login, pass, id)
   local escape = require("socket.url").escape
-  local request = http_request.new_from_uri("https://plex.tv/users/sign_in.xml")
+  local request = http_request.new_from_uri("https://plex.tv/users/sign_in.json")
   request.headers:append("X-Plex-Client-Identifier", id)
   request.headers:append("X-Plex-Product", "PMCLI")
   request.headers:append("X-Plex-Version", PMCLI.VERSION)
   request.headers:delete(":method")
   request.headers:append(":method", "POST")
   request.headers:append("Content-Type", "application/x-www-form-urlencoded")
+  request.headers:append("Accept", "application/json")
   request:set_body("user%5blogin%5d=" .. escape(login) .. "&user%5bpassword%5d=" .. escape(pass))
   local headers, stream = request:go()
   if not headers then
     io.stderr:write("[!!!] Network error on token request: " .. stream ..  "\n")
     os.exit(1)
   end
-  self.handler = self.handler:new()
-  self.handler.options = PMCLI.HANDLER_OPTS
-  self.parser = xml2lua.parser(self.handler)
-  self.parser:parse(stream:get_body_as_string())
-  if self.handler.root.errors then
-    return nil, self.handler.root.errors.error
+  local reply = json.decode(stream:get_body_as_string())
+  if reply.error then
+    return nil, reply.error
   else
-    return self.handler.root.user._attr.authenticationToken
+    return reply.user.authentication_token
   end
 end
 -- ===========================
@@ -136,7 +129,7 @@ end
 
 -- ========== FUNCTIONS ==========
 -- conveniency for simple y/n confirmation dialogs
-function PMCLI:confirm_yn(msg)
+function confirm_yn(msg)
   io.stdout:write(msg .. " [y/n]\n")
   repeat
     yn = io.read()
@@ -164,26 +157,53 @@ function PMCLI:play_media(suffix)
 end
 
 
-function PMCLI:get_menu_items()
+function PMCLI:get_menu_items(reply)
   local items = {}
-  for child_name, child in pairs(self.handler.root.MediaContainer) do
-    for _,item in pairs(child) do
-      if item._attr and item._attr.title then
-        item._tag = child_name
-        items[#items + 1] = item
+  
+  -- libraries and relevant views (All, By Album etc.)
+  if reply.MediaContainer.Directory then
+    for _, item in ipairs(reply.MediaContainer.Directory) do
+      items[#items + 1] = {
+        title = html_entities.decode(item.title),
+        key = item.key,
+        tag = "L"
+      }
+    end
+  end
+  -- actual items
+  if reply.MediaContainer.Metadata then
+    for _, item in ipairs(reply.MediaContainer.Metadata) do
+      if item.type == "track" or item.type == "episode" or item.type == "movie" then
+      -- streamable file
+        items[#items + 1] = {
+          title = html_entities.decode(item.title),
+          rating_key = item.ratingKey,
+          part_key = item.Media[1].Part[1].key, -- TODO: support items with multiple versions
+          tag = item.type:sub(1,1):upper() -- T, E, M
+        }
+      else
+      -- some kind of directory; NB this includes when type is nil which, afaik, is only for folders in "By Folder" view
+        items[#items + 1] = {
+          title = html_entities.decode(item.title),
+          key = item.key,
+          tag = "D"
+        }
       end
     end
   end
-  items._menu_title = self.handler.root.MediaContainer._attr.title1
+
+  items.title = html_entities.decode(reply.MediaContainer.title1)
+  items.allow_sync = reply.MediaContainer.allowSync
+  items.is_root = reply.MediaContainer.viewGroup == nil
   return items
 end
 
 
-local function print_menu(items, is_root)
-  io.stdout:write("\n=== " .. html_entities.decode(items._menu_title) .. " ===\n")
-  io.stdout:write(is_root and "0: quit\n" or "0: ..\n")
+local function print_menu(items)
+  io.stdout:write("\n=== " .. items.title .. " ===\n")
+  io.stdout:write(items.is_root and "0: quit\n" or "0: ..\n")
   for i,item in ipairs(items) do
-    io.stdout:write(item._tag:sub(1,1) .. " " .. i .. ": " .. html_entities.decode(item._attr.title) .. "\n")
+    io.stdout:write(item.tag .. " " .. i .. ": " .. item.title .. "\n")
   end
 end
 
@@ -212,27 +232,23 @@ local function join_keys(s1, s2)
 end
 
 
-function PMCLI:open_menu(key, is_root)
+function PMCLI:open_menu(key)
 -- TODO: rewrite to avoid recursion (so old handlers can go out of scope and be GC'd)
 -- we'll need a stack of menu keys to know where to backtrack
-  local items
-  self.handler = self.handler:new()
-  self.handler.options = PMCLI.HANDLER_OPTS
-  self.parser = xml2lua.parser(self.handler)
-  self.parser:parse(self:plex_request(key))
-  items = self:get_menu_items()
+  local reply = json.decode(self:plex_request(key))
+  local items = self:get_menu_items(reply)
   while true do
-    print_menu(items, is_root)
+    print_menu(items)
     for _,c in ipairs(utils.read_commands()) do
       if c == 0 then
         return
       elseif c == "q" then
         io.stdout:write("Bye!\n")
         os.exit()
-      elseif items[c]._tag == "Directory" then
-        self:open_menu(join_keys(key, items[c]._attr.key), false)
-      elseif items[c]._tag == "Video" or items[c]._tag == "Track" then
-        self:play_media(join_keys(key, items[c].Media.Part._attr.key))
+      elseif items[c].tag == "D" or items[c].tag == "L" then
+        self:open_menu(join_keys(key, items[c].key))
+      elseif items[c].tag == "T" or items[c].tag == "M" or items[c].tag == "E" then
+        self:play_media(join_keys(key, items[c].part_key))
       end
     end
   end
@@ -241,7 +257,7 @@ end
 
 
 function PMCLI:run()
-  self:open_menu("/library/sections", true)
+  self:open_menu("/library/sections")
   io.stdout:write("Bye!\n")
 end
 
