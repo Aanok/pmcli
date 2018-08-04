@@ -153,7 +153,7 @@ end
 
 
 function PMCLI:play_media(suffix)
-  os.execute("mpv " ..  self.options.base_addr .. suffix)
+  os.execute("mpv " ..  self.options.base_addr .. suffix .. "?X-Plex-Token=" .. self.options.plex_token)
 end
 
 
@@ -232,24 +232,36 @@ local function join_keys(s1, s2)
 end
 
 
+function PMCLI:open_item(key, item)
+  if item.tag == "D" or item.tag == "L" then
+    self:open_menu(join_keys(key, item.key))
+  elseif item.tag == "T" or item.tag == "M" or item.tag == "E" then
+    self:play_media(join_keys(key, item.part_key))
+  end
+end
+
+
 function PMCLI:open_menu(key)
 -- TODO: rewrite to avoid recursion (so old handlers can go out of scope and be GC'd)
 -- we'll need a stack of menu keys to know where to backtrack
   local reply = json.decode(self:plex_request(key))
   local items = self:get_menu_items(reply)
+  reply = nil
   while true do
     print_menu(items)
     for _,c in ipairs(utils.read_commands()) do
-      if c == 0 then
-        return
-      elseif c == "q" then
-        io.stdout:write("Bye!\n")
-        os.exit()
-      elseif items[c].tag == "D" or items[c].tag == "L" then
-        self:open_menu(join_keys(key, items[c].key))
-      elseif items[c].tag == "T" or items[c].tag == "M" or items[c].tag == "E" then
-        self:play_media(join_keys(key, items[c].part_key))
-      end
+        if c == "q" then
+          io.stdout:write("Bye!\n")
+          os.exit()
+        elseif c == "*" then
+          for _,item in ipairs(items) do
+            self:open_item(key, item)
+          end
+        elseif c == 0 then
+          return
+        elseif c > 0 and c <= #items then
+          self:open_item(key, items[c])
+        end
     end
   end
 end
