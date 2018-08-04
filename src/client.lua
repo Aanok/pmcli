@@ -153,7 +153,7 @@ end
 
 
 function PMCLI:play_media(suffix)
-  os.execute("mpv " ..  self.options.base_addr .. suffix .. "?X-Plex-Token=" .. self.options.plex_token)
+  os.execute("mpv " ..  self.options.base_addr .. suffix)
 end
 
 
