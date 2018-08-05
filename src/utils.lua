@@ -5,7 +5,6 @@ local lpeg = require("lpeg")
 
 -- ========== COMMAND PARSER ===========
 function utils.expand_range(left, right)
-  print(left,right)
   local range = {}
   local step = left <= right and 1 or -1
   for i = left,right,step do
