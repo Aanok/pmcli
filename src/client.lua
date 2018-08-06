@@ -19,6 +19,9 @@ local json = require("dkjson").use_lpeg()
 
 -- our own utils
 local utils = require("pmcli.utils")
+
+-- for now at least, a necessary evil
+local sleep = require("cqueues").sleep
 -- ==============================
 
 
@@ -37,6 +40,11 @@ function pmcli.new()
   local http_tls = require("http.tls")
   http_tls.has_hostname_validation = self.options.require_hostname_validation
   self.ssl_context = http_tls.new_client_context()
+  
+  -- we create the socket for mpv in advance
+  self.mpv_socket_name = os.tmpname()
+  self.mpv_socket = require("cqueues.socket").connect({ path = self.mpv_socket_name })
+  self.mpv_socket:settimeout(10.0)
   
   return self
 end
@@ -152,12 +160,79 @@ function PMCLI:plex_request(suffix)
 end
 
 
-function PMCLI:play_media(suffix)
-  os.execute("mpv " ..  self.options.base_addr .. suffix .. "?X-Plex-Token=" .. self.options.plex_token)
+function PMCLI:read_mpv_socket_all(item)
+    repeat
+    local msg, err = self.mpv_socket:read()
+    if msg == nil and err == 110 then
+      -- timeout
+      self.mpv_socket:clearerr()
+      return false
+    elseif msg then
+      local decoded = json.decode(msg)
+      if decoded.data then -- reply to playback-time request
+        local msecs = math.floor(decoded.data*1000) -- secs from mpv, millisecs for plex
+        if msecs > item.duration * 0.975 then -- close enough to end, scrobble
+          self:plex_request("/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library")
+        else -- just update viewOffset
+          self:plex_request("/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library")
+        end
+      end
+    end
+  until msg == nil and err ~= 110 -- TODO: handle this
+  self.mpv_socket:clearerr()
+  return true
+end
+
+function msecs_to_time(ms)
+  return os.date("%T", math.floor(ms/1000) - 3600) -- H:M:S, epoch was at 1AM
 end
 
 
-function PMCLI:get_menu_items(reply)
+function PMCLI:play_media(item)
+  local mpv_args = "--input-ipc-server=" .. self.mpv_socket_name .. " "
+  if item.view_offset and confirm_yn("The item is set as partially viewed. Would you like to resume at " .. msecs_to_time(item.view_offset) .. "?") then
+    mpv_args = mpv_args .. "--start=" .. msecs_to_time(item.view_offset)
+  end
+  mpv_args = mpv_args .. " " .. self.options.base_addr .. item.part_key .. "?X-Plex-Token=" .. self.options.plex_token .. " &"
+  
+  os.execute("mpv " .. mpv_args)
+  -- wait for mpv to setup the socket
+  repeat
+    sleep(0.25)
+  until self.mpv_socket:peername() -- FIXME: recognize actual failures!
+  -- sync loop
+  repeat
+    self.mpv_socket:write('{ "command": ["get_property", "playback-time"] }\n')
+  until self:read_mpv_socket_all(item)
+  os.execute("stty sane") -- really, really ugly
+end
+
+
+local function join_keys(s1, s2)
+  local i = 0
+  local match_length = -1
+  -- preprocessing: remove leading /
+  if s1:sub(1,1) == "/" then s1 = s1:sub(2) end
+  if s2:sub(1,1) == "/" then s2 = s2:sub(2) end
+  for i = 1, math.min(#s1, #s2) do
+    if s1:sub(1,i) == s2:sub(1,i) then
+      match_length = i
+    elseif match_length ~= -1 then
+      -- there's been a match before, so that was the overlap
+      break
+    end
+  end
+  if match_length == -1 then
+    return "/" .. s1 .. "/" .. s2
+  elseif match_length == #s2 then
+    return "/" .. s2
+  else
+    return "/" .. s1:sub(1, match_length) .. s2:sub(match_length + 1)
+  end
+end
+
+
+function PMCLI:get_menu_items(reply, parent_key)
   local items = {}
   
   -- libraries and relevant views (All, By Album etc.)
@@ -165,7 +240,7 @@ function PMCLI:get_menu_items(reply)
     for _, item in ipairs(reply.MediaContainer.Directory) do
       items[#items + 1] = {
         title = html_entities.decode(item.title),
-        key = item.key,
+        key = join_keys(parent_key, item.key),
         tag = "L"
       }
     end
@@ -177,8 +252,10 @@ function PMCLI:get_menu_items(reply)
       -- streamable file
         items[#items + 1] = {
           title = html_entities.decode(item.title),
+          duration = item.duration,
+          view_offset = item.viewOffset,
           rating_key = item.ratingKey,
-          part_key = item.Media[1].Part[1].key, -- TODO: support items with multiple versions
+          part_key = join_keys(parent_key, item.Media[1].Part[1].key), -- TODO: support items with multiple versions
           tag = item.type:sub(1,1):upper() -- T, E, M
         }
       else
@@ -208,44 +285,20 @@ local function print_menu(items)
 end
 
 
-local function join_keys(s1, s2)
-  local i = 0
-  local match_length = -1
-  -- preprocessing: remove leading /
-  if s1:sub(1,1) == "/" then s1 = s1:sub(2) end
-  if s2:sub(1,1) == "/" then s2 = s2:sub(2) end
-  for i = 1, math.min(#s1, #s2) do
-    if s1:sub(1,i) == s2:sub(1,i) then
-      match_length = i
-    elseif match_length ~= -1 then
-      -- there's been a match before, so that was the overlap
-      break
-    end
-  end
-  if match_length == -1 then
-    return "/" .. s1 .. "/" .. s2
-  elseif match_length == #s2 then
-    return "/" .. s2
-  else
-    return "/" .. s1:sub(1, match_length) .. s2:sub(match_length + 1)
-  end
-end
-
-
-function PMCLI:open_item(key, item)
+function PMCLI:open_item(item)
   if item.tag == "D" or item.tag == "L" then
-    self:open_menu(join_keys(key, item.key))
+    self:open_menu(item)
   elseif item.tag == "T" or item.tag == "M" or item.tag == "E" then
-    self:play_media(join_keys(key, item.part_key))
+    self:play_media(item)
   end
 end
 
 
-function PMCLI:open_menu(key)
+function PMCLI:open_menu(parent_item)
 -- TODO: rewrite to avoid recursion (so old handlers can go out of scope and be GC'd)
 -- we'll need a stack of menu keys to know where to backtrack
-  local reply = json.decode(self:plex_request(key))
-  local items = self:get_menu_items(reply)
+  local reply = json.decode(self:plex_request(parent_item.key))
+  local items = self:get_menu_items(reply, parent_item.key)
   reply = nil
   while true do
     print_menu(items)
@@ -255,12 +308,12 @@ function PMCLI:open_menu(key)
           os.exit()
         elseif c == "*" then
           for _,item in ipairs(items) do
-            self:open_item(key, item)
+            self:open_item(item)
           end
         elseif c == 0 then
           return
         elseif c > 0 and c <= #items then
-          self:open_item(key, items[c])
+          self:open_item(items[c])
         end
     end
   end
@@ -269,7 +322,7 @@ end
 
 
 function PMCLI:run()
-  self:open_menu("/library/sections")
+  self:open_menu({ key = "/library/sections" })
   io.stdout:write("Bye!\n")
 end
 
