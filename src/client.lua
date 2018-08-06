@@ -189,21 +189,33 @@ end
 
 
 function PMCLI:play_media(item)
+-- this whole mechanism is a mess. look into something better.
   local mpv_args = "--input-ipc-server=" .. self.mpv_socket_name .. " "
   if item.view_offset and confirm_yn("The item is set as partially viewed. Would you like to resume at " .. msecs_to_time(item.view_offset) .. "?") then
     mpv_args = mpv_args .. "--start=" .. msecs_to_time(item.view_offset)
   end
-  mpv_args = mpv_args .. " " .. self.options.base_addr .. item.part_key .. "?X-Plex-Token=" .. self.options.plex_token .. " &"
+  mpv_args = mpv_args .. " " .. self.options.base_addr .. item.part_key .. "?X-Plex-Token=" .. self.options.plex_token
   
-  os.execute("mpv " .. mpv_args)
+  os.execute("mpv " .. mpv_args .. " &")
   -- wait for mpv to setup the socket
+  local laps = 0
   repeat
     sleep(0.25)
-  until self.mpv_socket:peername() -- FIXME: recognize actual failures!
+    laps = laps + 1
+  until self.mpv_socket:peername() or laps > 20 -- after 5 seconds, we recognize a failure. very ugly.
   -- sync loop
-  repeat
-    self.mpv_socket:write('{ "command": ["get_property", "playback-time"] }\n')
-  until self:read_mpv_socket_all(item)
+  if laps <= 20 then
+    repeat
+      self.mpv_socket:write('{ "command": ["get_property", "playback-time"] }\n')
+    until self:read_mpv_socket_all(item)
+  else
+    io.stderr:write("[!] Couldn't reach socket IPC, won't sync progress.\n")
+  end
+  
+  -- wait for mpv to exit; especially useful if IPC socket failed; still, abominably ugly
+  while os.execute("pgrep 'mpv " .. mpv_args .."'") do
+    sleep(0.25)
+  end
   os.execute("stty sane") -- really, really ugly
 end
 
