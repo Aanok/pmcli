@@ -25,6 +25,56 @@ local sleep = require("cqueues").sleep
 -- ==============================
 
 
+-- ========== CONVENIENCIES ==========
+-- conveniency for simple y/n confirmation dialogs
+function pmcli.confirm_yn(msg)
+  io.stdout:write(msg .. " [y/n]\n")
+  repeat
+    yn = io.read()
+  until yn == "y" or yn == "n"
+  return yn == "y"
+end
+
+
+function pmcli.msecs_to_time(ms)
+  return os.date("%T", math.floor(ms/1000) - 3600) -- H:M:S, epoch was at 1AM
+end
+
+
+function pmcli.print_menu(items)
+  io.stdout:write("\n=== " .. items.title .. " ===\n")
+  io.stdout:write(items.is_root and "0: quit\n" or "0: ..\n")
+  for i,item in ipairs(items) do
+    io.stdout:write(item.tag .. " " .. i .. ": " .. item.title .. "\n")
+  end
+end
+
+
+function pmcli.join_keys(s1, s2)
+  local i = 0
+  local match_length = -1
+  -- preprocessing: remove leading /
+  if s1:sub(1,1) == "/" then s1 = s1:sub(2) end
+  if s2:sub(1,1) == "/" then s2 = s2:sub(2) end
+  for i = 1, math.min(#s1, #s2) do
+    if s1:sub(1,i) == s2:sub(1,i) then
+      match_length = i
+    elseif match_length ~= -1 then
+      -- there's been a match before, so that was the overlap
+      break
+    end
+  end
+  if match_length == -1 then
+    return "/" .. s1 .. "/" .. s2
+  elseif match_length == #s2 then
+    return "/" .. s2
+  else
+    return "/" .. s1:sub(1, match_length) .. s2:sub(match_length + 1)
+  end
+end
+-- ===================================
+
+
 -- ========== SETUP ==========
 -- constructor
 function pmcli.new()
@@ -61,7 +111,7 @@ end
 
 
 function PMCLI:first_time_config()
-  if not confirm_yn("\nConfiguration file not found. Would you like to proceed with configuration and login?") then
+  if not pmcli.confirm_yn("\nConfiguration file not found. Would you like to proceed with configuration and login?") then
     io.stdout:write("Bye!\n")
     os.exit()
   end
@@ -88,7 +138,7 @@ function PMCLI:first_time_config()
     options.plex_token, errmsg = self:request_token(login, password, options.unique_identifier)
     if not options.plex_token then
       io.stderr:write("[!!] Authentication error: ", errmsg .. "\n")
-      if not confirm_yn("Would you like to try again with new credentials?") then
+      if not pmcli.confirm_yn("Would you like to try again with new credentials?") then
         io.stdout:write("Bye!\n")
         os.exit(1)
       end
@@ -98,7 +148,7 @@ function PMCLI:first_time_config()
   password = nil
   collectgarbage()
   
-  options.require_hostname_validation = not confirm_yn("\nDo you need PMCLI to ignore hostname validation (must e.g. if PMS under different local address)?")
+  options.require_hostname_validation = not pmcli.confirm_yn("\nDo you need PMCLI to ignore hostname validation (must e.g. if PMS under different local address)?")
   
   io.stdout:write("\nCommitting configuration to disk...\n")
   utils.write_config(options)
@@ -136,16 +186,6 @@ end
 
 
 -- ========== FUNCTIONS ==========
--- conveniency for simple y/n confirmation dialogs
-function confirm_yn(msg)
-  io.stdout:write(msg .. " [y/n]\n")
-  repeat
-    yn = io.read()
-  until yn == "y" or yn == "n"
-  return yn == "y"
-end
-
-
 function PMCLI:plex_request(suffix)
 -- TODO: better error handling
   local request = http_request.new_from_uri(self.options.base_addr .. suffix)
@@ -183,16 +223,12 @@ function PMCLI:mpv_socket_read_all(item)
   return true
 end
 
-function msecs_to_time(ms)
-  return os.date("%T", math.floor(ms/1000) - 3600) -- H:M:S, epoch was at 1AM
-end
-
 
 function PMCLI:play_media(item)
 -- this whole mechanism is a mess. look into something better.
   local mpv_args = "--input-ipc-server=" .. self.mpv_socket_name .. " "
-  if item.view_offset and confirm_yn("The item is set as partially viewed. Would you like to resume at " .. msecs_to_time(item.view_offset) .. "?") then
-    mpv_args = mpv_args .. "--start=" .. msecs_to_time(item.view_offset)
+  if item.view_offset and pmcli.confirm_yn("The item is set as partially viewed. Would you like to resume at " .. pmcli.msecs_to_time(item.view_offset) .. "?") then
+    mpv_args = mpv_args .. "--start=" .. pmcli.msecs_to_time(item.view_offset)
   end
   mpv_args = mpv_args .. self.options.base_addr .. item.part_key .. "?X-Plex-Token=" .. self.options.plex_token
   
@@ -222,30 +258,6 @@ function PMCLI:play_media(item)
 end
 
 
-local function join_keys(s1, s2)
-  local i = 0
-  local match_length = -1
-  -- preprocessing: remove leading /
-  if s1:sub(1,1) == "/" then s1 = s1:sub(2) end
-  if s2:sub(1,1) == "/" then s2 = s2:sub(2) end
-  for i = 1, math.min(#s1, #s2) do
-    if s1:sub(1,i) == s2:sub(1,i) then
-      match_length = i
-    elseif match_length ~= -1 then
-      -- there's been a match before, so that was the overlap
-      break
-    end
-  end
-  if match_length == -1 then
-    return "/" .. s1 .. "/" .. s2
-  elseif match_length == #s2 then
-    return "/" .. s2
-  else
-    return "/" .. s1:sub(1, match_length) .. s2:sub(match_length + 1)
-  end
-end
-
-
 function PMCLI:get_menu_items(reply, parent_key)
   local items = {}
   
@@ -254,7 +266,7 @@ function PMCLI:get_menu_items(reply, parent_key)
     for _, item in ipairs(reply.MediaContainer.Directory) do
       items[#items + 1] = {
         title = html_entities.decode(item.title),
-        key = join_keys(parent_key, item.key),
+        key = pmcli.join_keys(parent_key, item.key),
         tag = "L"
       }
     end
@@ -269,7 +281,7 @@ function PMCLI:get_menu_items(reply, parent_key)
           duration = item.duration,
           view_offset = item.viewOffset,
           rating_key = item.ratingKey,
-          part_key = join_keys(parent_key, item.Media[1].Part[1].key), -- TODO: support items with multiple versions
+          part_key = pmcli.join_keys(parent_key, item.Media[1].Part[1].key), -- TODO: support items with multiple versions
           tag = item.type:sub(1,1):upper() -- T, E, M
         }
       else
@@ -290,15 +302,6 @@ function PMCLI:get_menu_items(reply, parent_key)
 end
 
 
-local function print_menu(items)
-  io.stdout:write("\n=== " .. items.title .. " ===\n")
-  io.stdout:write(items.is_root and "0: quit\n" or "0: ..\n")
-  for i,item in ipairs(items) do
-    io.stdout:write(item.tag .. " " .. i .. ": " .. item.title .. "\n")
-  end
-end
-
-
 function PMCLI:open_item(item)
   if item.tag == "D" or item.tag == "L" then
     self:open_menu(item)
@@ -315,7 +318,7 @@ function PMCLI:open_menu(parent_item)
   local items = self:get_menu_items(reply, parent_item.key)
   reply = nil
   while true do
-    print_menu(items)
+    pmcli.print_menu(items)
     for _,c in ipairs(utils.read_commands()) do
         if c == "q" then
           io.stdout:write("Bye!\n")
