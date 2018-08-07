@@ -112,8 +112,7 @@ end
 
 function PMCLI:first_time_config()
   if not pmcli.confirm_yn("\nConfiguration file not found. Would you like to proceed with configuration and login?") then
-    io.stdout:write("Bye!\n")
-    os.exit()
+    self:quit()
   end
   
   local options = {}
@@ -139,8 +138,7 @@ function PMCLI:first_time_config()
     if not options.plex_token then
       io.stderr:write("[!!] Authentication error: ", errmsg .. "\n")
       if not pmcli.confirm_yn("Would you like to try again with new credentials?") then
-        io.stdout:write("Bye!\n")
-        os.exit(1)
+        self:quit("Configuration was unsuccessful.\n")
       end
     end
   until options.plex_token
@@ -172,8 +170,7 @@ function PMCLI:request_token(login, pass, id)
   request:set_body("user%5blogin%5d=" .. escape(login) .. "&user%5bpassword%5d=" .. escape(pass))
   local headers, stream = request:go()
   if not headers then
-    io.stderr:write("[!!!] Network error on token request: " .. stream ..  "\n")
-    os.exit(1)
+    self:quit("[!!!] Network error on token request: " .. stream ..  "\n")
   end
   local reply = json.decode(stream:get_body_as_string())
   if reply.error then
@@ -186,6 +183,18 @@ end
 
 
 -- ========== FUNCTIONS ==========
+function PMCLI:quit(error_message)
+  os.remove(self.mpv_socket_name)
+  if error_message then
+    io.stderr:write(error_message)
+    os.exit(1)
+  else
+    io.stdout:write("Bye!\n")
+    os.exit(0)
+  end
+end
+
+
 function PMCLI:plex_request(suffix)
 -- TODO: better error handling
   local request = http_request.new_from_uri(self.options.base_addr .. suffix)
@@ -193,8 +202,7 @@ function PMCLI:plex_request(suffix)
   self:setup_headers(request.headers)
   local headers, stream = request:go()
   if not headers then
-    io.stderr:write("[!!!] Network error on API request " .. self.options.base_addr .. suffix .. ": " .. stream ..  "\n")
-    os.exit(1)
+    self:quit("[!!!] Network error on API request " .. self.options.base_addr .. suffix .. ": " .. stream ..  "\n")
   end
   return stream:get_body_as_string()
 end
@@ -321,8 +329,7 @@ function PMCLI:open_menu(parent_item)
     pmcli.print_menu(items)
     for _,c in ipairs(utils.read_commands()) do
         if c == "q" then
-          io.stdout:write("Bye!\n")
-          os.exit()
+          self:quit()
         elseif c == "*" then
           for _,item in ipairs(items) do
             self:open_item(item)
@@ -340,7 +347,7 @@ end
 
 function PMCLI:run()
   self:open_menu({ key = "/library/sections" })
-  io.stdout:write("Bye!\n")
+  self:quit()
 end
 
 
