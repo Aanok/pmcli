@@ -20,3 +20,5 @@ On first start, you will be prompted for configuration and login.
 **IMPORTANT**: only login with Plex credentials is supported. If you use Plex via OAuth with your Google or Facebook account, you will have to resort to [manual configuration](https://github.com/Aanok/pmcli/wiki).
 
 Navigation should be straightforward; mind that you can express command ranges as `n1-n2`, command sequences as `s1,s2`, open everything in the current menu with `*` and can always submit `q` to quit immediately.
+
+If you encounter problems, check the [troubleshooting](https://github.com/Aanok/pmcli/wiki/Troubleshooting) page.
