@@ -4,7 +4,11 @@ local pmcli = {}
 -- class
 -- we init some "static" values
 local PMCLI = {
-  VERSION = "0.1"
+  VERSION = "0.1",
+  HELP_TEXT = [[Usage:
+  pmcli [ --login ]
+  pmcli [ --help ]
+]]
 }
 
 -- ========== REQUIRES ==========
@@ -120,6 +124,8 @@ function PMCLI:parse_args(args)
   for i,arg in ipairs(args) do
     if arg == "--login" then
       parsed_args.login = true
+    elseif arg == "--help" then
+      self:quit(PMCLI.HELP_TEXT)
     end
   end
   return parsed_args
