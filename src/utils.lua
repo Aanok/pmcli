@@ -102,7 +102,7 @@ function utils.read_password()
       io.stdout:flush()
     elseif not ch then -- some IO error has occurred
       os.execute("stty echo cooked")
-      print("[!!!] Error while reading character from stdin.")
+      io.stderr:write("[!!!] Error while reading character from stdin.\n")
       os.exit(1)
     else -- valid character. mind it's a... wide definition of valid. like, Meta+F1 is valid.
       io.stdout:write("*")
@@ -142,8 +142,8 @@ end
 function utils.write_config(options)
   local file, e = io.open(utils.get_config_absolute_filename(), "w")
   if not file then
-    print("[!] Error committing configuration to config file.")
-    print(e)
+    io.stderr:write("[!!!] Error committing configuration to config file.")
+    io.stderr:write(e)
     os.exit(1)
   end
   for k,v in pairs(options) do
