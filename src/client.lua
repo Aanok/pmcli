@@ -77,14 +77,28 @@ end
 
 -- ========== SETUP ==========
 -- constructor
-function pmcli.new()
+function pmcli.new(args)
   io.stdout:write("Plex Media CLIent v" ..  PMCLI.VERSION .. "\n")
   local self = {}
   setmetatable(self, { __index = PMCLI })
   
+  -- first, read 
+  local parsed_args = self:parse_args(args)
+  
   -- setup options from config file
   -- or, alternatively, ask user and login
-  self.options = utils.get_config() or self:first_time_config()
+  self.options = utils.get_config()
+  if not self.options then
+    -- config file not found
+    -- if --login was passed, skip confirmation prompt
+    self.options = self:first_time_config(parsed_args.login)
+  elseif self.options and parsed_args.login then
+    -- config file found but user wants to redo login
+    io.stdout:write("Attempting new login to obtain a new token.\n")
+    self.options.plex_token, self.options.unique_identifier = self:login(self.options.unique_identifier)
+    io.stdout:write("Committing config to disk...\n\n")
+    utils.write_config(self.options)
+  end
   
   -- if we need to step around mismatched hostnames from the certificate
   local http_tls = require("http.tls")
@@ -100,6 +114,18 @@ function pmcli.new()
 end
 
 
+-- command line arguments
+function PMCLI:parse_args(args)
+  local parsed_args = {}
+  for i,arg in ipairs(args) do
+    if arg == "--login" then
+      parsed_args.login = true
+    end
+  end
+  return parsed_args
+end
+
+
 -- headers for auth access
 function PMCLI:setup_headers(headers)
   headers:append("X-Plex-Client-Identifier", self.options.unique_identifier)
@@ -110,14 +136,36 @@ function PMCLI:setup_headers(headers)
 end
 
 
-function PMCLI:first_time_config()
-  if not pmcli.confirm_yn("\nConfiguration file not found. Would you like to proceed with configuration and login?") then
+function PMCLI:login()
+  local plex_token
+  local unique_identifier = "pmcli-" .. PMCLI.VERSION .. "-" .. utils.generate_random_id()
+  repeat 
+    io.stdout:write("\nPlease enter your Plex account name or email.\n")
+    local login = io.read()
+    io.stdout:write("\nPlease enter your Plex account password.\n")
+    local password = utils.read_password()
+    local errmsg
+    plex_token, errmsg = self:request_token(login, password, unique_identifier)
+    if not plex_token then
+      io.stderr:write("[!!] Authentication error: ", errmsg .. "\n")
+      if not pmcli.confirm_yn("Would you like to try again with new credentials?") then
+        self:quit("Configuration was unsuccessful.\n")
+      end
+    end
+  until plex_token
+  -- delete password from process memory as soon as possible
+  password = nil
+  collectgarbage()
+  return plex_token, unique_identifier
+end
+
+
+function PMCLI:first_time_config(skip_prompt)
+  if not skip_prompt and not pmcli.confirm_yn("\nConfiguration file not found. Would you like to proceed with configuration and login?") then
     self:quit()
   end
   
   local options = {}
-  
-  options.unique_identifier = "pmcli-" .. PMCLI.VERSION .. "-" .. utils.generate_random_id()
   
   local uri_patt = require("lpeg_patterns.uri").uri * -1
   io.stdout:write("\nPlease enter an address (and port if not default) to access your Plex Media Server.\nIt should look like https://example.com:32400 .\n")
@@ -128,30 +176,16 @@ function PMCLI:first_time_config()
     end
   until uri_patt:match(options.base_addr)
   
-  repeat 
-    io.stdout:write("\nPlease enter your Plex account name or email.\n")
-    local login = io.read()
-    io.stdout:write("\nPlease enter your Plex account password.\n")
-    local password = utils.read_password()
-    local errmsg
-    options.plex_token, errmsg = self:request_token(login, password, options.unique_identifier)
-    if not options.plex_token then
-      io.stderr:write("[!!] Authentication error: ", errmsg .. "\n")
-      if not pmcli.confirm_yn("Would you like to try again with new credentials?") then
-        self:quit("Configuration was unsuccessful.\n")
-      end
-    end
-  until options.plex_token
-  -- delete password from process memory as soon as possible
-  password = nil
-  collectgarbage()
+  options.plex_token, options.unique_identifier = self:login()
   
   options.require_hostname_validation = not pmcli.confirm_yn("\nDo you need PMCLI to ignore hostname validation (must e.g. if PMS under different local address)?")
   
   io.stdout:write("\nCommitting configuration to disk...\n")
   utils.write_config(options)
   
-  io.stdout:write("Connecting to Plex Server...\n")
+  -- flag to ignore --login
+  self.did_first_config = true
+  
   return options
 end
 
@@ -184,7 +218,7 @@ end
 
 -- ========== FUNCTIONS ==========
 function PMCLI:quit(error_message)
-  os.remove(self.mpv_socket_name)
+  if self.mpv_socket_name then os.remove(self.mpv_socket_name) end
   if error_message then
     io.stderr:write(error_message)
     os.exit(1)
@@ -346,6 +380,7 @@ end
 
 
 function PMCLI:run()
+  io.stdout:write("Connecting to Plex Server...\n")
   self:open_menu({ key = "/library/sections" })
   self:quit()
 end

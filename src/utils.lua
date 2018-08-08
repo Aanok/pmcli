@@ -142,13 +142,14 @@ end
 function utils.write_config(options)
   local file, e = io.open(utils.get_config_absolute_filename(), "w")
   if not file then
-    io.stderr:write("[!!!] Error committing configuration to config file.")
-    io.stderr:write(e)
+    io.stderr:write("[!!!] Error committing configuration to config file: ")
+    io.stderr:write(e .. "\n")
     os.exit(1)
   end
   for k,v in pairs(options) do
     file:write(tostring(k) .. " = " .. tostring(v) .. "\n")
   end
+  file:close()
 end
 
 

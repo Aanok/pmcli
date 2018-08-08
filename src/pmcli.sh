@@ -1,1 +1,1 @@
-require("pmcli.client").new():run()
+require("pmcli.client").new(arg):run()
