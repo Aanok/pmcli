@@ -210,7 +210,7 @@ function PMCLI:request_token(login, pass, id)
   request:set_body("user%5blogin%5d=" .. escape(login) .. "&user%5bpassword%5d=" .. escape(pass))
   local headers, stream = request:go()
   if not headers then
-    self:quit("[!!!] Network error on token request: " .. stream ..  "\n")
+    self:quit("[!!!] Network error on token request:\n" .. stream ..  "\n")
   end
   local reply = json.decode(stream:get_body_as_string())
   if reply.error then
@@ -242,7 +242,7 @@ function PMCLI:plex_request(suffix)
   self:setup_headers(request.headers)
   local headers, stream = request:go()
   if not headers then
-    self:quit("[!!!] Network error on API request " .. self.options.base_addr .. suffix .. ": " .. stream ..  "\n")
+    self:quit("[!!!] Network error on API request " .. self.options.base_addr .. suffix .. ":\n" .. stream ..  "\n")
   end
   return stream:get_body_as_string()
 end
@@ -261,8 +261,10 @@ function PMCLI:mpv_socket_read_all(item)
         local msecs = math.floor(decoded.data*1000) -- secs from mpv, millisecs for plex
         if msecs > item.duration * 0.975 then -- close enough to end, scrobble
           self:plex_request("/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library")
+          item.view_offset = nil
         else -- just update viewOffset
           self:plex_request("/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library")
+          item.view_offset = msecs
         end
       end
     end
@@ -274,11 +276,11 @@ end
 
 function PMCLI:play_media(item)
 -- this whole mechanism is a mess. look into something better.
-  local mpv_args = "--input-ipc-server=" .. self.mpv_socket_name .. " "
+  local mpv_args = "--input-ipc-server=" .. self.mpv_socket_name
   if item.view_offset and pmcli.confirm_yn("The item is set as partially viewed. Would you like to resume at " .. pmcli.msecs_to_time(item.view_offset) .. "?") then
-    mpv_args = mpv_args .. "--start=" .. pmcli.msecs_to_time(item.view_offset)
+    mpv_args = mpv_args .. " --start=" .. pmcli.msecs_to_time(item.view_offset)
   end
-  mpv_args = mpv_args .. self.options.base_addr .. item.part_key .. "?X-Plex-Token=" .. self.options.plex_token
+  mpv_args = mpv_args .. " " .. self.options.base_addr .. item.part_key .. "?X-Plex-Token=" .. self.options.plex_token
   
   os.execute("mpv " .. mpv_args .. " &")
   -- wait for mpv to setup the socket
