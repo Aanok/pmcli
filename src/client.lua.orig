@@ -210,7 +210,7 @@ function PMCLI:request_token(login, pass, id)
   request:set_body("user%5blogin%5d=" .. escape(login) .. "&user%5bpassword%5d=" .. escape(pass))
   local headers, stream = request:go()
   if not headers then
-    self:quit("[!!!] Network error on token request: " .. stream ..  "\n")
+    self:quit("[!!!] Network error on token request:\n" .. stream ..  "\n")
   end
   local reply = json.decode(stream:get_body_as_string())
   if reply.error then
@@ -243,9 +243,12 @@ function PMCLI:plex_request(suffix)
   local headers, stream = request:go(10.0) -- 10 secs timeout
   if not headers then
     self:quit("[!!!] Network error on API request " .. self.options.base_addr .. suffix .. ":\n" .. stream ..  "\n")
+<<<<<<< HEAD
   end
   if headers:get(":status") == "401" then
     self:quit("[!!!] API request returned error 401: unauthorized.\nYour token may have expired, consider logging in again by passing --login.\n")
+=======
+>>>>>>> baa0aa3c6b38274e2f3e2de4bb09ac2604ab4b35
   end
   return stream:get_body_as_string()
 end
