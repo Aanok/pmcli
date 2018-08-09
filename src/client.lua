@@ -240,9 +240,12 @@ function PMCLI:plex_request(suffix)
   local request = http_request.new_from_uri(self.options.base_addr .. suffix)
   request.ctx = ssl_context
   self:setup_headers(request.headers)
-  local headers, stream = request:go()
+  local headers, stream = request:go(10.0) -- 10 secs timeout
   if not headers then
-    self:quit("[!!!] Network error on API request " .. self.options.base_addr .. suffix .. ": " .. stream ..  "\n")
+    self:quit("[!!!] Network error on API request " .. self.options.base_addr .. suffix .. ":\n" .. stream ..  "\n")
+  end
+  if headers:get(":status") == "401" then
+    self:quit("[!!!] API request returned error 401: unauthorized.\nYour token may have expired, consider logging in again by passing --login.\n")
   end
   return stream:get_body_as_string()
 end
@@ -289,7 +292,7 @@ function PMCLI:play_media(item)
   until self.mpv_socket:peername() or laps > 20 -- after 5 seconds, we recognize a failure. very ugly.
   -- sync loop
   if laps > 20 then
-    io.stderr:write("[!] Couldn't reach socket IPC, won't sync progress to Plex server.\n")
+    io.stderr:write("[!] Couldn't reach IPC socket, won't sync progress to Plex server.\n")
   else
     repeat
       self.mpv_socket:write('{ "command": ["get_property", "playback-time"] }\n')
