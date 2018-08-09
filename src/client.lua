@@ -277,11 +277,11 @@ end
 
 function PMCLI:play_media(item)
 -- this whole mechanism is a mess. look into something better.
-  local mpv_args = "--input-ipc-server=" .. self.mpv_socket_name .. " "
+  local mpv_args = "--input-ipc-server=" .. self.mpv_socket_name
   if item.view_offset and pmcli.confirm_yn("The item is set as partially viewed. Would you like to resume at " .. pmcli.msecs_to_time(item.view_offset) .. "?") then
-    mpv_args = mpv_args .. "--start=" .. pmcli.msecs_to_time(item.view_offset)
+    mpv_args = mpv_args .. " --start=" .. pmcli.msecs_to_time(item.view_offset)
   end
-  mpv_args = mpv_args .. self.options.base_addr .. item.part_key .. "?X-Plex-Token=" .. self.options.plex_token
+  mpv_args = mpv_args .. " " .. self.options.base_addr .. item.part_key .. "?X-Plex-Token=" .. self.options.plex_token
   
   os.execute("mpv " .. mpv_args .. " &")
   -- wait for mpv to setup the socket
