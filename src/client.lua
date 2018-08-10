@@ -48,7 +48,7 @@ function pmcli.msecs_to_time(ms)
 end
 
 
-function pmcli._menu(items)
+function pmcli.print_menu(items)
   io.stdout:write("\n=== " .. items.title .. " ===\n")
   io.stdout:write(items.is_root and "0: quit\n" or "0: ..\n")
   for i,item in ipairs(items) do
