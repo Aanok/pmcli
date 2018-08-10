@@ -26,6 +26,9 @@ local utils = require("pmcli.utils")
 
 -- for now at least, a necessary evil
 local sleep = require("cqueues").sleep
+
+-- mpv IPC
+local socket = require("cqueues.socket")
 -- ==============================
 
 
@@ -45,7 +48,7 @@ function pmcli.msecs_to_time(ms)
 end
 
 
-function pmcli.print_menu(items)
+function pmcli._menu(items)
   io.stdout:write("\n=== " .. items.title .. " ===\n")
   io.stdout:write(items.is_root and "0: quit\n" or "0: ..\n")
   for i,item in ipairs(items) do
@@ -109,12 +112,15 @@ function pmcli.new(args)
   http_tls.has_hostname_validation = self.options.require_hostname_validation
   self.ssl_context = http_tls.new_client_context()
   
-  -- we create the socket for mpv in advance
   self.mpv_socket_name = os.tmpname()
-  self.mpv_socket = require("cqueues.socket").connect({ path = self.mpv_socket_name })
-  self.mpv_socket:settimeout(10.0)
   
   return self
+end
+
+
+function PMCLI:connect_mpv_socket()
+  self.mpv_socket = socket.connect({ path = self.mpv_socket_name })
+  self.mpv_socket:settimeout(10.0)
 end
 
 
@@ -283,10 +289,12 @@ function PMCLI:play_media(item)
   if item.view_offset and pmcli.confirm_yn("The item is set as partially viewed. Would you like to resume at " .. pmcli.msecs_to_time(item.view_offset) .. "?") then
     mpv_args = mpv_args .. " --start=" .. pmcli.msecs_to_time(item.view_offset)
   end
+  mpv_args = mpv_args .. " " .. '--title="' .. item.title .. '"'
   mpv_args = mpv_args .. " " .. self.options.base_addr .. item.part_key .. "?X-Plex-Token=" .. self.options.plex_token
   
   os.execute("mpv " .. mpv_args .. " &")
   -- wait for mpv to setup the socket
+  self:connect_mpv_socket()
   local laps = 0
   repeat
     sleep(0.25)
