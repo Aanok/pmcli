@@ -159,7 +159,7 @@ function PMCLI:login()
     local errmsg
     plex_token, errmsg = self:request_token(login, password, unique_identifier)
     if not plex_token then
-      io.stderr:write("[!!] Authentication error: ", errmsg .. "\n")
+      io.stderr:write("[!!] Authentication error:\n", errmsg .. "\n")
       if not pmcli.confirm_yn("Would you like to try again with new credentials?") then
         self:quit("Configuration was unsuccessful.\n")
       end
@@ -194,9 +194,6 @@ function PMCLI:first_time_config(skip_prompt)
   
   io.stdout:write("\nCommitting configuration to disk...\n")
   utils.write_config(options)
-  
-  -- flag to ignore --login
-  self.did_first_config = true
   
   return options
 end
