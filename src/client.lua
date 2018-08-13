@@ -204,7 +204,7 @@ end
 
 -- token request
 function PMCLI:request_token(login, pass, id)
-  local escape = require("socket.url").escape
+  local escape = require("http.util").encodeURIComponent
   local request = http_request.new_from_uri("https://plex.tv/users/sign_in.json")
   request.headers:append("X-Plex-Client-Identifier", id)
   request.headers:append("X-Plex-Product", "PMCLI")
