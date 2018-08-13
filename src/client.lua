@@ -102,7 +102,7 @@ function pmcli.new(args)
   elseif self.options and parsed_args.login then
     -- config file found but user wants to redo login
     io.stdout:write("Attempting new login to obtain a new token.\n")
-    self.options.plex_token, self.options.unique_identifier = self:login(self.options.unique_identifier)
+    self.options.plex_token, self.options.unique_identifier = self:login()
     io.stdout:write("Committing config to disk...\n\n")
     utils.write_config(self.options)
   end
