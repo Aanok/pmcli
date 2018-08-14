@@ -157,6 +157,7 @@ function utils.get_config()
   -- defaults
   local options = {
     require_hostname_validation = true,
+    verify_certificates = true,
     unique_identifier = "pmcli-dummy"
   }
     

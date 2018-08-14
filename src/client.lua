@@ -112,6 +112,11 @@ function pmcli.new(args)
   http_tls.has_hostname_validation = self.options.require_hostname_validation
   self.ssl_context = http_tls.new_client_context()
   
+  -- if we need to skip certificate validation
+  if not self.options.verify_certificates then
+    self.ssl_context:setVerify(require("openssl.ssl.context").VERIFY_NONE)
+  end
+  
   self.mpv_socket_name = os.tmpname()
   
   return self
@@ -241,7 +246,7 @@ end
 function PMCLI:plex_request(suffix)
 -- TODO: better error handling
   local request = http_request.new_from_uri(self.options.base_addr .. suffix)
-  request.ctx = ssl_context
+  request.ctx = self.ssl_context
   self:setup_headers(request.headers)
   local headers, stream = request:go(10.0) -- 10 secs timeout
   if not headers then
