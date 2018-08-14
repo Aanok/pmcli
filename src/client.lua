@@ -113,7 +113,7 @@ function pmcli.new(args)
   self.ssl_context = http_tls.new_client_context()
   
   -- if we need to skip certificate validation
-  if not self.options.verify_certificates then
+  if not self.options.verify_server_certificates then
     self.ssl_context:setVerify(require("openssl.ssl.context").VERIFY_NONE)
   end
   
