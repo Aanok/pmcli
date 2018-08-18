@@ -152,6 +152,8 @@ function PMCLI:parse_args(args)
       -- next argument is parameter
       parsed_args.config_filename = args[i + 1]
       i = i + 1
+    else
+      self:quit("[!!!] Unrecognized command line option: " .. args[i] .. "\n")
     end
     i = i + 1
   end
