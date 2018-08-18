@@ -268,17 +268,20 @@ end
 
 function PMCLI:plex_request(suffix)
 -- TODO: better error handling
-  local request = http_request.new_from_uri(self.options.base_addr .. suffix)
+  local request = http_request.new_from_uri(self.options.base_addr ..  suffix)
   request.ctx = self.ssl_context
   self:setup_headers(request.headers)
   local headers, stream = request:go(10.0) -- 10 secs timeout
   if not headers then
     self:quit("[!!!] Network error on API request " .. self.options.base_addr .. suffix .. ":\n" .. stream ..  "\n")
   end
-  if headers:get(":status") == "401" then
-    self:quit("[!!!] API request returned error 401: unauthorized.\nYour token may have expired, consider logging in again by passing --login.\n")
+  if headers:get(":status") == "200" then
+    return stream:get_body_as_string()
+  elseif headers:get(":status") == "401" then
+    self:quit("[!!!] API request " .. self.options.base_addr .. suffix .. " returned error 401: unauthorized.\nYour token may have expired, consider logging in again by passing --login.\n")
+  else
+    self:quit("[!!!] API request " .. self.options.base_addr .. suffix .. " returned error " .. headers:get(":status") .. ".\n")
   end
-  return stream:get_body_as_string()
 end
 
 
