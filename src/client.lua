@@ -7,8 +7,7 @@ local PMCLI = {
   VERSION = "0.1",
   HELP_TEXT = [[Usage:
   pmcli [ --login ] [ --config configuration_file ]
-  pmcli [ --help ]
-]]
+  pmcli [ --help ] ]]
 }
 
 -- ========== REQUIRES ==========
@@ -102,7 +101,7 @@ function pmcli.new(args)
     self.options = self:first_time_config(parsed_args.login, parsed_args.config_filename)
   elseif not self.options and error_code ~= 2 then
     -- real error
-    self:quit("[!!!] Error opening configuration file:\n" .. error_message .. "\n")
+    self:quit("Error opening configuration file:\n" .. error_message)
   elseif self.options and parsed_args.login then
     -- config file found but user wants to redo login
     io.stdout:write("Attempting new login to obtain a new token.\n")
@@ -113,7 +112,7 @@ function pmcli.new(args)
     if not ok and error_code == -2 then
       io.stderr:write(error_message .. "\n")
     elseif not ok and error_code ~= -2 then
-      self:quit("[!!!] Error writing configuration file:\n" .. error_message .. "\n")
+      self:quit("Error writing configuration file:\n" .. error_message)
     end
   end
   
@@ -153,7 +152,7 @@ function PMCLI:parse_args(args)
       parsed_args.config_filename = args[i + 1]
       i = i + 1
     else
-      self:quit("[!!!] Unrecognized command line option: " .. args[i] .. "\n")
+      self:quit("Unrecognized command line option: " .. args[i])
     end
     i = i + 1
   end
@@ -178,13 +177,15 @@ function PMCLI:login()
     io.stdout:write("\nPlease enter your Plex account name or email.\n")
     local login = io.read()
     io.stdout:write("\nPlease enter your Plex account password.\n")
-    local password = utils.read_password()
-    local errmsg
+    local password, errmsg = utils.read_password()
+    if not password then
+      self:quit(errmsg)
+    end
     plex_token, errmsg = self:request_token(login, password, unique_identifier)
     if not plex_token then
       io.stderr:write("[!!] Authentication error:\n", errmsg .. "\n")
       if not pmcli.confirm_yn("Would you like to try again with new credentials?") then
-        self:quit("Configuration was unsuccessful.\n")
+        self:quit("Configuration was unsuccessful.")
       end
     end
   until plex_token
@@ -207,7 +208,7 @@ function PMCLI:first_time_config(skip_prompt, user_filename)
   repeat
     options.base_addr = io.read()
     if not uri_patt:match(options.base_addr) then
-      io.stderr:write("[!] Malformed URI. Please try again.\n")
+      io.stderr:write("[!!] Malformed URI. Please try again.\n")
     end
   until uri_patt:match(options.base_addr)
   
@@ -220,7 +221,7 @@ function PMCLI:first_time_config(skip_prompt, user_filename)
   if not ok and error_code == -2 then
     io.stderr:write(error_message .. "\n")
   elseif not ok and error_code ~= -2 then
-    self:quit("[!!!] Error writing configuration file:\n" .. error_message .. "\n")
+    self:quit("Error writing configuration file:\n" .. error_message)
   end
   
   return options
@@ -241,7 +242,7 @@ function PMCLI:request_token(login, pass, id)
   request:set_body("user%5blogin%5d=" .. escape(login) .. "&user%5bpassword%5d=" .. escape(pass))
   local headers, stream = request:go()
   if not headers then
-    self:quit("[!!!] Network error on token request: " .. stream ..  "\n")
+    self:quit("Network error on token request: " .. stream)
   end
   local reply = json.decode(stream:get_body_as_string())
   if reply.error then
@@ -257,7 +258,7 @@ end
 function PMCLI:quit(error_message)
   if self.mpv_socket_name then os.remove(self.mpv_socket_name) end
   if error_message then
-    io.stderr:write(error_message)
+    io.stderr:write("[!!!] " .. error_message ..  "\n")
     os.exit(1)
   else
     io.stdout:write("Bye!\n")
@@ -273,14 +274,14 @@ function PMCLI:plex_request(suffix)
   self:setup_headers(request.headers)
   local headers, stream = request:go(10.0) -- 10 secs timeout
   if not headers then
-    self:quit("[!!!] Network error on API request " .. self.options.base_addr .. suffix .. ":\n" .. stream ..  "\n")
+    self:quit("Network error on API request " .. self.options.base_addr .. suffix .. ":\n" .. stream)
   end
   if headers:get(":status") == "200" then
     return stream:get_body_as_string()
   elseif headers:get(":status") == "401" then
-    self:quit("[!!!] API request " .. self.options.base_addr .. suffix .. " returned error 401: unauthorized.\nYour token may have expired, consider logging in again by passing --login.\n")
+    self:quit("API request " .. self.options.base_addr .. suffix .. " returned error 401: unauthorized.\nYour token may have expired, consider logging in again by passing --login.")
   else
-    self:quit("[!!!] API request " .. self.options.base_addr .. suffix .. " returned error " .. headers:get(":status") .. ".\n")
+    self:quit("API request " .. self.options.base_addr .. suffix .. " returned error " .. headers:get(":status") .. ".")
   end
 end
 
