@@ -293,10 +293,8 @@ function PMCLI:mpv_socket_read_all(item)
         local msecs = math.floor(decoded.data*1000) -- secs from mpv, millisecs for plex
         if msecs > item.duration * 0.975 then -- close enough to end, scrobble
           self:plex_request("/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library")
-          item.view_offset = nil
         else -- just update viewOffset
           self:plex_request("/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library")
-          item.view_offset = msecs
         end
       end
     end
@@ -398,10 +396,10 @@ end
 function PMCLI:open_menu(parent_item)
 -- TODO: rewrite to avoid recursion (so old handlers can go out of scope and be GC'd)
 -- we'll need a stack of menu keys to know where to backtrack
-  local reply = json.decode(self:plex_request(parent_item.key))
-  local items = self:get_menu_items(reply, parent_item.key)
-  reply = nil
   while true do
+    local reply = json.decode(self:plex_request(parent_item.key))
+    local items = self:get_menu_items(reply, parent_item.key)
+    reply = nil
     pmcli.print_menu(items)
     for _,c in ipairs(utils.read_commands()) do
         if c == "q" then
