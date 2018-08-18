@@ -135,25 +135,39 @@ end
 function utils.get_config_absolute_filename()
   local dir = os.getenv("XDG_CONFIG_HOME")
   dir = dir or (os.getenv("HOME") and os.getenv("HOME") .. "/.config")
-  return dir .. "/pmcli_config"
+  if not dir then
+    return nil, "specify a configuration file location by --config or either $XDG_CONFIG_HOME or $HOME need to be set"
+  else
+    return dir .. "/pmcli_config"
+  end
 end
 
 
-function utils.write_config(options)
-  local file, e = io.open(utils.get_config_absolute_filename(), "w")
+function utils.write_config(options, user_filename)
+  local config_filename, error_message = user_filename or utils.get_config_absolute_filename()
+  if not config_filename then
+    -- file not found of sorts
+    return nil, error_message, -1
+  end
+  local file, error_message, error_code = io.open(config_filename, "w")
   if not file then
-    io.stderr:write("[!!!] Error committing configuration to config file: ")
-    io.stderr:write(e .. "\n")
-    os.exit(1)
+    -- error when opening
+    return file, error_message, error_code
   end
   for k,v in pairs(options) do
     file:write(tostring(k) .. " = " .. tostring(v) .. "\n")
   end
   file:close()
+  
+  if not os.execute("chmod 600 " .. config_filename) then
+    return nil, "[!] Error setting 600 permissions to " .. config_filename .. ", you may want to double-check", -2
+  else
+    return true
+  end
 end
 
 
-function utils.get_config()
+function utils.get_config(user_filename)
   -- defaults
   local options = {
     require_hostname_validation = true,
@@ -162,9 +176,13 @@ function utils.get_config()
   }
     
   -- open file
-  local file = io.open(utils.get_config_absolute_filename())
-  if not file then -- config file not found
-    return nil
+  local config_filename, error_message = user_filename or utils.get_config_absolute_filename()
+  if not config_filename then
+    return nil, error_message
+  end
+  local file, error_message, error_code = io.open(config_filename)
+  if not file then -- config file not found or other error
+    return nil, error_message, error_code
   end
   
   -- parse file

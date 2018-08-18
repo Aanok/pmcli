@@ -6,7 +6,7 @@ local pmcli = {}
 local PMCLI = {
   VERSION = "0.1",
   HELP_TEXT = [[Usage:
-  pmcli [ --login ]
+  pmcli [ --login ] [ --config configuration_file ]
   pmcli [ --help ]
 ]]
 }
@@ -94,17 +94,27 @@ function pmcli.new(args)
   
   -- setup options from config file
   -- or, alternatively, ask user and login
-  self.options = utils.get_config()
-  if not self.options then
+  local error_message, error_code
+  self.options, error_message, error_code = utils.get_config(parsed_args.config_filename)
+  if not self.options and error_code == 2 then
     -- config file not found
     -- if --login was passed, skip confirmation prompt
-    self.options = self:first_time_config(parsed_args.login)
+    self.options = self:first_time_config(parsed_args.login, parsed_args.config_filename)
+  elseif not self.options and error_code ~= 2 then
+    -- real error
+    self:quit("[!!!] Error opening configuration file:\n" .. error_message .. "\n")
   elseif self.options and parsed_args.login then
     -- config file found but user wants to redo login
     io.stdout:write("Attempting new login to obtain a new token.\n")
     self.options.plex_token, self.options.unique_identifier = self:login()
-    io.stdout:write("Committing config to disk...\n\n")
-    utils.write_config(self.options)
+    io.stdout:write("Committing configuration to disk...\n")
+    
+    local ok, error_message, error_code = utils.write_config(self.options, parsed_args.config_filename)
+    if not ok and error_code == -2 then
+      io.stderr:write(error_message .. "\n")
+    elseif not ok and error_code ~= -2 then
+      self:quit("[!!!] Error writing configuration file:\n" .. error_message .. "\n")
+    end
   end
   
   -- if we need to step around mismatched hostnames from the certificate
@@ -132,12 +142,18 @@ end
 -- command line arguments
 function PMCLI:parse_args(args)
   local parsed_args = {}
-  for i,arg in ipairs(args) do
-    if arg == "--login" then
+  local i = 1
+  while i <= #args do
+    if args[i] == "--login" then
       parsed_args.login = true
-    elseif arg == "--help" then
+    elseif args[i] == "--help" then
       self:quit(PMCLI.HELP_TEXT)
+    elseif args[i] == "--config" then
+      -- next argument is parameter
+      parsed_args.config_filename = args[i + 1]
+      i = i + 1
     end
+    i = i + 1
   end
   return parsed_args
 end
@@ -177,7 +193,7 @@ function PMCLI:login()
 end
 
 
-function PMCLI:first_time_config(skip_prompt)
+function PMCLI:first_time_config(skip_prompt, user_filename)
   if not skip_prompt and not pmcli.confirm_yn("\nConfiguration file not found. Would you like to proceed with configuration and login?") then
     self:quit()
   end
@@ -198,7 +214,12 @@ function PMCLI:first_time_config(skip_prompt)
   options.require_hostname_validation = not pmcli.confirm_yn("\nDo you need PMCLI to ignore hostname validation (must e.g. if PMS under different local address)?")
   
   io.stdout:write("\nCommitting configuration to disk...\n")
-  utils.write_config(options)
+  local ok, error_message, error_code = utils.write_config(options, user_filename)
+  if not ok and error_code == -2 then
+    io.stderr:write(error_message .. "\n")
+  elseif not ok and error_code ~= -2 then
+    self:quit("[!!!] Error writing configuration file:\n" .. error_message .. "\n")
+  end
   
   return options
 end
