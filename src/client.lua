@@ -256,6 +256,7 @@ end
 -- ========== FUNCTIONS ==========
 function PMCLI:quit(error_message)
   if self.mpv_socket_name then os.remove(self.mpv_socket_name) end
+  os.execute("stty sane") -- in case of fatal errors while mpv is running
   if error_message then
     io.stderr:write(error_message)
     os.exit(1)
