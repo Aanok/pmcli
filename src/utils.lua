@@ -50,7 +50,7 @@ utils.command_list = lpeg.Ct({
 function utils.read_commands()
   local commands = utils.command_list:match(io.read())
   while not commands do
-    print("[!] Malformed command string, please try again.")
+    io.stderr:write("[!!] Malformed command string, please try again.\n")
     commands = utils.command_list:match(io.read())
   end
   return commands
@@ -102,8 +102,7 @@ function utils.read_password()
       io.stdout:flush()
     elseif not ch then -- some IO error has occurred
       os.execute("stty echo cooked")
-      io.stderr:write("[!!!] Error while reading character from stdin.\n")
-      os.exit(1)
+      return nil, "Error while reading character from stdin."
     else -- valid character. mind it's a... wide definition of valid. like, Meta+F1 is valid.
       io.stdout:write("*")
       io.stdout:flush()
@@ -126,7 +125,7 @@ function utils.parse_config_line(line)
   if value == "true" then
     value = true
   elseif value == "false" then
-    value= false
+    value = false
   end
   return key, value
 end
