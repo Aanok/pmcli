@@ -269,13 +269,13 @@ end
 
 
 function PMCLI:plex_request(suffix)
--- TODO: better error handling
   local request = http_request.new_from_uri(self.options.base_addr ..  suffix)
   request.ctx = self.ssl_context
   self:setup_headers(request.headers)
   local headers, stream = request:go(10.0) -- 10 secs timeout
   if not headers then
-    self:quit("Network error on API request " .. self.options.base_addr .. suffix .. ":\n" .. stream)
+    -- timeout or other network error of sorts
+    return nil, stream
   end
   if headers:get(":status") == "200" then
     return stream:get_body_as_string()
@@ -299,9 +299,15 @@ function PMCLI:mpv_socket_read_all(item)
       if decoded.data then -- reply to playback-time request
         local msecs = math.floor(decoded.data*1000) -- secs from mpv, millisecs for plex
         if msecs > item.duration * 0.975 then -- close enough to end, scrobble
-          self:plex_request("/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library")
+          local ok, error_msg = self:plex_request("/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library")
+          if not ok then
+            io.stderr:write("[!] Network error on API request " .. self.options.base_addr ..  "/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library" .. ":\n" .. error_msg .. "\n")
+          end
         else -- just update viewOffset
-          self:plex_request("/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library")
+          local ok, error_msg = self:plex_request("/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library")
+          if not ok then
+            io.stderr:write("[!] Network error on API request " .. self.options.base_addr ..  "/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library" .. ":\n" .. error_msg .. "\n")
+          end
         end
       end
     end
@@ -404,7 +410,11 @@ function PMCLI:open_menu(parent_item)
 -- TODO: rewrite to avoid recursion (so old handlers can go out of scope and be GC'd)
 -- we'll need a stack of menu keys to know where to backtrack
   while true do
-    local reply = json.decode(self:plex_request(parent_item.key))
+    local body, error_msg = self:plex_request(parent_item.key)
+    if not body then
+      self:quit("Network error on API request " .. self.options.base_addr .. parent_item.key .. ":\n" .. error_msg)
+    end
+    local reply = json.decode(body)
     local items = self:get_menu_items(reply, parent_item.key)
     reply = nil
     pmcli.print_menu(items)
