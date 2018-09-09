@@ -299,14 +299,16 @@ function PMCLI:mpv_socket_read_all(item)
       if decoded.data then -- reply to playback-time request
         local msecs = math.floor(decoded.data*1000) -- secs from mpv, millisecs for plex
         if msecs > item.duration * 0.975 then -- close enough to end, scrobble
-          local ok, error_msg = self:plex_request("/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library")
+          local request = "/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library"
+          local ok, error_msg = self:plex_request(request)
           if not ok then
-            io.stderr:write("[!] Network error on API request " .. self.options.base_addr ..  "/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library" .. ":\n" .. error_msg .. "\n")
+            io.stderr:write("[!] Network error on API request " .. request .. ":\n" .. error_msg .. "\n")
           end
         else -- just update viewOffset
-          local ok, error_msg = self:plex_request("/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library")
+          local request = "/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library"
+          local ok, error_msg = self:plex_request(request)
           if not ok then
-            io.stderr:write("[!] Network error on API request " .. self.options.base_addr ..  "/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library" .. ":\n" .. error_msg .. "\n")
+            io.stderr:write("[!] Network error on API request " .. request .. ":\n" .. error_msg .. "\n")
           end
         end
       end
