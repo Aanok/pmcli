@@ -148,7 +148,10 @@ function PMCLI:parse_args(args)
     elseif args[i] == "--help" then
       self:quit(PMCLI.HELP_TEXT)
     elseif args[i] == "--config" then
-      -- next argument is parameter
+      -- next argument should be parameter
+      if not args[i + 1] then
+        self:quit("--config requires a filename.")
+      end
       parsed_args.config_filename = args[i + 1]
       i = i + 1
     else
@@ -409,8 +412,6 @@ end
 
 
 function PMCLI:open_menu(parent_item)
--- TODO: rewrite to avoid recursion (so old handlers can go out of scope and be GC'd)
--- we'll need a stack of menu keys to know where to backtrack
   while true do
     local body, error_msg = self:plex_request(parent_item.key)
     if not body then
