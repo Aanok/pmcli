@@ -81,6 +81,22 @@ function pmcli.join_keys(s1, s2)
     return "/" .. s1:sub(1, match_length) .. s2:sub(match_length + 1)
   end
 end
+
+
+function pmcli.compute_title(item)
+  if item.title then
+    -- the item table is reasonable
+    if item.title ~= "" then
+      -- title field is filled, use it
+      return html_entities.decode(item.title)
+    elseif item.Media and item.Media[1].Part[1] then
+      -- infer title from corresponding filename, like POSIX basename util
+      return string.match(html_entities.decode(item.Media[1].Part[1].file), ".*/(.*)%..*")
+    end
+  end
+  -- either malformed item table or no media file to infer from
+  return "Unknown title"
+end
 -- ===================================
 
 
@@ -367,7 +383,7 @@ function PMCLI:get_menu_items(reply, parent_key)
   if reply.MediaContainer.Directory then
     for _, item in ipairs(reply.MediaContainer.Directory) do
       items[#items + 1] = {
-        title = html_entities.decode(item.title),
+        title = pmcli.compute_title(item),
         key = pmcli.join_keys(parent_key, item.key),
       }
       if item.search then
@@ -383,7 +399,7 @@ function PMCLI:get_menu_items(reply, parent_key)
       if item.type == "track" or item.type == "episode" or item.type == "movie" then
       -- streamable file
         items[#items + 1] = {
-          title = html_entities.decode(item.title),
+          title = pmcli.compute_title(item),
           duration = item.duration,
           view_offset = item.viewOffset,
           rating_key = item.ratingKey,
@@ -393,7 +409,7 @@ function PMCLI:get_menu_items(reply, parent_key)
       else
       -- some kind of directory; NB this includes when type is nil which, afaik, is only for folders in "By Folder" view
         items[#items + 1] = {
-          title = html_entities.decode(item.title),
+          title = pmcli.compute_title(item),
           key = item.key,
           tag = "D"
         }
