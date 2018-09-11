@@ -28,6 +28,9 @@ local sleep = require("cqueues").sleep
 
 -- mpv IPC
 local socket = require("cqueues.socket")
+
+-- HTTP URL escaping
+local http_encode = require("http.util").encodeURIComponent
 -- ==============================
 
 
@@ -233,7 +236,6 @@ end
 
 -- token request
 function PMCLI:request_token(login, pass, id)
-  local escape = require("http.util").encodeURIComponent
   local request = http_request.new_from_uri("https://plex.tv/users/sign_in.json")
   request.headers:append("X-Plex-Client-Identifier", id)
   request.headers:append("X-Plex-Product", "PMCLI")
@@ -242,7 +244,7 @@ function PMCLI:request_token(login, pass, id)
   request.headers:append(":method", "POST")
   request.headers:append("Content-Type", "application/x-www-form-urlencoded")
   request.headers:append("Accept", "application/json")
-  request:set_body("user%5blogin%5d=" .. escape(login) .. "&user%5bpassword%5d=" .. escape(pass))
+  request:set_body("user%5blogin%5d=" .. http_encode(login) .. "&user%5bpassword%5d=" .. http_encode(pass))
   local headers, stream = request:go()
   if not headers then
     self:quit("Network error on token request: " .. stream)
@@ -367,8 +369,12 @@ function PMCLI:get_menu_items(reply, parent_key)
       items[#items + 1] = {
         title = html_entities.decode(item.title),
         key = pmcli.join_keys(parent_key, item.key),
-        tag = "L"
       }
+      if item.search then
+        items[#items].tag = "?"
+      else
+        items[#items].tag = "L"
+      end
     end
   end
   -- actual items
@@ -407,7 +413,17 @@ function PMCLI:open_item(item)
     self:open_menu(item)
   elseif item.tag == "T" or item.tag == "M" or item.tag == "E" then
     self:play_media(item)
+  elseif item.tag == "?" then
+    self:local_search(item)
   end
+end
+
+
+function PMCLI:local_search(search_item)
+  io.stdout:write("Please enter your search query: ");
+  local query = "&query=" .. http_encode(io.read())
+  search_item.key = search_item.key .. query
+  self:open_menu(search_item)
 end
 
 
