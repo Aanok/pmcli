@@ -497,7 +497,7 @@ function PMCLI:play_video(item)
     local stream_item = {
       title = item.title,
       view_offset = metadata.viewOffset,
-      --duration = metadata.duration,
+      duration = metadata.duration,
       rating_key = metadata.ratingKey,
       part_keys = { p.key },
       subs = { }
