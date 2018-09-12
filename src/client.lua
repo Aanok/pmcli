@@ -497,7 +497,7 @@ function PMCLI:play_video(item)
     local stream_item = {
       title = item.title,
       view_offset = metadata.viewOffset,
-      duration = metadata.duration,
+      --duration = metadata.duration,
       rating_key = metadata.ratingKey,
       part_keys = { p.key },
       subs = { }
@@ -528,6 +528,9 @@ function PMCLI:open_menu(parent_item)
       self:quit("Network error on API request " .. self.options.base_addr .. parent_item.key .. ":\n" .. error_msg)
     end
     local reply = json.decode(body)
+    if not reply.MediaContainer or not reply.MediaContainer.title1 then
+      self:quit("Unexpected reply to API request " .. self.options.base_addr .. parent_item.key .. ":\n" .. body)
+    end
     local items = self:get_menu_items(reply, parent_item.key)
     reply = nil
     pmcli.print_menu(items)
@@ -551,8 +554,8 @@ end
 
 function PMCLI:run()
   io.stdout:write("Connecting to Plex Server...\n")
-  self:open_menu({ key = "/library/sections" })
-  self:quit()
+  local _, errmsg = pcall(self.open_menu, self, { key = "/library/sections" })
+  self:quit(errmsg)
 end
 
 
