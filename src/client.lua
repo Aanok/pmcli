@@ -236,7 +236,7 @@ function PMCLI:first_time_config(skip_prompt, user_filename)
   
   options.plex_token, options.unique_identifier = self:login()
   
-  options.require_hostname_validation = not pmcli.confirm_yn("\nDo you need PMCLI to ignore hostname validation (must e.g. if PMS under different local address)?")
+  options.require_hostname_validation = not pmcli.confirm_yn("\nDo you need PMCLI to ignore hostname validation (must e.g. if using builtin SSL certificate)?")
   
   io.stdout:write("\nCommitting configuration to disk...\n")
   local ok, error_message, error_code = utils.write_config(options, user_filename)
@@ -325,7 +325,7 @@ function PMCLI:mpv_socket_read_all(item)
           if not ok then
             io.stderr:write("[!] Network error on API request " .. request .. ":\n" .. error_msg .. "\n")
           end
-        else -- just update viewOffset
+        elseif msecs > item.duration * 0.025 then -- far enough from start, update viewOffset
           local request = "/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library"
           local ok, error_msg = self:plex_request(request)
           if not ok then
@@ -418,7 +418,6 @@ function PMCLI:get_menu_items(reply, parent_key)
   end
 
   items.title = html_entities.decode(reply.MediaContainer.title1)
-  items.allow_sync = reply.MediaContainer.allowSync
   items.is_root = reply.MediaContainer.viewGroup == nil
   return items
 end
@@ -453,6 +452,7 @@ function PMCLI:open_menu(parent_item)
     local items = self:get_menu_items(reply, parent_item.key)
     reply = nil
     pmcli.print_menu(items)
+    print(parent_item.key)
     for _,c in ipairs(utils.read_commands()) do
         if c == "q" then
           self:quit()
