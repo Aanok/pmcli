@@ -350,8 +350,10 @@ function PMCLI:play_media(item)
   mpv_args = mpv_args .. " --http-header-fields='X-Plex-Token: " .. self.options.plex_token .. "'"
   
   -- subs for video
-  for _,s in ipairs(item.subs) do
-    mpv_args = mpv_args .. " --sub-file=" .. s
+  if item.subs then
+    for _,s in ipairs(item.subs) do
+      mpv_args = mpv_args .. " --sub-file=" .. s
+    end
   end
   -- one part for video, many for audio playlist
   for _,k in ipairs(item.part_keys) do
@@ -412,7 +414,6 @@ function PMCLI:get_menu_items(reply, parent_key)
           duration = item.duration,
           view_offset = item.viewOffset,
           rating_key = item.ratingKey,
-          media = pmcli.compute_media(item, parent_key),
           part_keys = { pmcli.join_keys(parent_key, item.Media[1].Part[1].key) },
           tag = "T"
         }
