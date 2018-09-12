@@ -347,7 +347,8 @@ function PMCLI:play_media(item)
     mpv_args = mpv_args .. " --start=" .. pmcli.msecs_to_time(item.view_offset)
   end
   mpv_args = mpv_args .. " " .. '--title="' .. item.title .. '"'
-  mpv_args = mpv_args .. " " .. self.options.base_addr .. item.part_key .. "?X-Plex-Token=" .. self.options.plex_token
+  mpv_args = mpv_args .. " --http-header-fields='X-Plex-Token: " .. self.options.plex_token .. "'"
+  mpv_args = mpv_args .. " " .. self.options.base_addr .. item.part_key
   
   os.execute("mpv " .. mpv_args .. " &")
   -- wait for mpv to setup the socket
@@ -452,7 +453,6 @@ function PMCLI:open_menu(parent_item)
     local items = self:get_menu_items(reply, parent_item.key)
     reply = nil
     pmcli.print_menu(items)
-    print(parent_item.key)
     for _,c in ipairs(utils.read_commands()) do
         if c == "q" then
           self:quit()
