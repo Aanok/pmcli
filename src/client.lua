@@ -348,7 +348,15 @@ function PMCLI:play_media(item)
   end
   mpv_args = mpv_args .. " " .. '--title="' .. item.title .. '"'
   mpv_args = mpv_args .. " --http-header-fields='X-Plex-Token: " .. self.options.plex_token .. "'"
-  mpv_args = mpv_args .. " " .. self.options.base_addr .. item.part_key
+  
+  -- subs for video
+  for _,s in ipairs(item.subs) do
+    mpv_args = mpv_args .. " --sub-file=" .. s
+  end
+  -- one part for video, many for audio playlist
+  for _,k in ipairs(item.part_keys) do
+    mpv_args = mpv_args .. " " .. self.options.base_addr .. k
+  end
   
   os.execute("mpv " .. mpv_args .. " &")
   -- wait for mpv to setup the socket
@@ -397,15 +405,23 @@ function PMCLI:get_menu_items(reply, parent_key)
   -- actual items
   if reply.MediaContainer.Metadata then
     for _, item in ipairs(reply.MediaContainer.Metadata) do
-      if item.type == "track" or item.type == "episode" or item.type == "movie" then
-      -- streamable file
+      if item.type == "track" then
+      -- audio: ready for streaming
         items[#items + 1] = {
           title = pmcli.compute_title(item),
           duration = item.duration,
           view_offset = item.viewOffset,
           rating_key = item.ratingKey,
-          part_key = pmcli.join_keys(parent_key, item.Media[1].Part[1].key), -- TODO: support items with multiple versions
-          tag = item.type:sub(1,1):upper() -- T, E, M
+          media = pmcli.compute_media(item, parent_key),
+          part_keys = { pmcli.join_keys(parent_key, item.Media[1].Part[1].key) },
+          tag = "T"
+        }
+      elseif item.type == "episode" or item.type == "movie" then
+      -- video: will require fetching metadata before streaming
+        items[#items + 1] = {
+          title = pmcli.compute_title(item),
+          key = item.key,
+          tag = item.type:sub(1,1):upper()
         }
       else
       -- some kind of directory; NB this includes when type is nil which, afaik, is only for folders in "By Folder" view
@@ -427,10 +443,72 @@ end
 function PMCLI:open_item(item)
   if item.tag == "D" or item.tag == "L" then
     self:open_menu(item)
-  elseif item.tag == "T" or item.tag == "M" or item.tag == "E" then
-    self:play_media(item)
+  elseif item.tag == "T" then
+    self:play_audio(item)
+  elseif item.tag == "M" or item.tag == "E" then
+    self:play_video(item)
   elseif item.tag == "?" then
     self:local_search(item)
+  end
+end
+
+
+-- PLACEHOLDER!!
+function PMCLI:play_audio(item)
+  self:play_media(item)
+end
+
+
+function PMCLI:play_video(item)
+  -- fetch metadata
+  local body, error_msg = self:plex_request(item.key)
+  if not body then
+    self:quit("Network error on API request " .. self.options.base_addr .. item.key .. ":\n" .. error_msg)
+  end
+  local reply = json.decode(body)
+  local metadata
+  if reply.MediaContainer and reply.MediaContainer.Metadata then
+    metadata = reply.MediaContainer.Metadata[1]
+    reply = nil
+  else
+    self:quit("Unexpected reply to API request " .. self.options.base_addr .. item.key)
+  end
+  
+  -- check if there are multiple versions for the requested item
+  local choice = 1
+  if #(metadata.Media) > 1 then
+    -- there are multiple versions and the user must choose
+    io.stdout:write("\nThere are multiple versions for " .. item.title .. ":\n")
+    for i,m in ipairs(metadata.Media) do
+      io.stdout:write(i .. ": " .. m.width .. "x" .. m.height .. " " .. m.videoCodec .. ", " ..  m.audioChannels .. " channel " .. m.audioCodec .. ", " .. m.bitrate .. "kbps\n")
+    end
+    -- user choice
+    io.stdout:write("Please select one for playback: ")
+    repeat
+      choice = tonumber(io.read())
+      if not choice or choice < 1 or choice > #(metadata.Media) then
+        io.stderr:write("[!!] Invalid choice.\n")
+      end
+    until choice and choice > 0  and choice <= #(metadata.Media)
+  end
+  
+  -- all parts, each with their respective subtitles, are sent for playback
+  for _,p in ipairs(metadata.Media[choice].Part) do
+    local stream_item = {
+      title = item.title,
+      view_offset = metadata.viewOffset,
+      duration = metadata.duration,
+      rating_key = metadata.ratingKey,
+      part_keys = { p.key },
+      subs = { }
+    }
+    for _,s in ipairs(p.Stream) do
+      if s.streamType == 3 and s.key then
+        -- it's a subtitle
+        table.insert(stream_item.subs, self.options.base_addr .. s.key)
+      end
+    end
+    self:play_media(stream_item)
   end
 end
 
