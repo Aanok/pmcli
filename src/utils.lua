@@ -60,6 +60,15 @@ end
 
 
 -- ========== MISCELLANEOUS ==========
+-- save stty state as we found it
+utils.stty_save = (function()
+  f = assert(io.popen("stty --save", "r"))
+  s = assert(f:read())
+  assert(f:close())
+  return s
+end)()
+
+
 function utils.generate_random_id()
   -- string of 32 random digits
   math.randomseed(os.time())
@@ -101,7 +110,7 @@ function utils.read_password()
       io.stdout:write("\n\r") -- accept EOL as end of string
       io.stdout:flush()
     elseif not ch then -- some IO error has occurred
-      os.execute("stty echo cooked")
+      os.execute("stty " .. utils.stty_save)
       return nil, "Error while reading character from stdin."
     else -- valid character. mind it's a... wide definition of valid. like, Meta+F1 is valid.
       io.stdout:write("*")
@@ -109,7 +118,7 @@ function utils.read_password()
       pass = pass .. ch
     end
   until ch == '\n' or ch == '\r'
-  os.execute("stty echo cooked")
+  os.execute("stty " .. utils.stty_save)
   return pass
 end
 
