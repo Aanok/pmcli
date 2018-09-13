@@ -279,7 +279,7 @@ end
 -- ========== FUNCTIONS ==========
 function PMCLI:quit(error_message)
   if self.mpv_socket_name then os.remove(self.mpv_socket_name) end
-  os.execute("stty sane") -- in case of fatal errors while mpv is running
+  os.execute("stty " .. utils.stty_save) -- in case of fatal errors while mpv is running
   if error_message then
     io.stderr:write("[!!!] " .. error_message ..  "\n")
     os.exit(1)
@@ -384,7 +384,7 @@ function PMCLI:play_media(item)
     sleep(0.5)
   end
   
-  os.execute("stty sane") -- really, really ugly
+  os.execute("stty " .. utils.stty_save) -- really, really ugly
 end
 
 
