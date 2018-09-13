@@ -112,6 +112,35 @@ function utils.read_password()
   os.execute("stty echo cooked")
   return pass
 end
+
+
+-- extension that also returns inline string representation of table tt
+-- courtesy of http://lua-users.org/wiki/TableSerialization :)
+function utils.tostring(tt, done)
+  done = done or {}
+  if type(tt) == "table" then
+    local sb = {}
+    table.insert(sb, "{ ")
+    for key, value in pairs (tt) do
+      if type(value) == "table" and not done[value] then
+        done[value] = true
+        --table.insert(sb, "{ ");
+        table.insert(sb, utils.tostring(value, done))
+        --table.insert(sb, "} ");
+      elseif "number" == type(key) then
+        table.insert(sb, string.format("\"%s\" ", tostring(value)))
+      else
+        table.insert(sb, string.format("%s = \"%s\" ", tostring (key), tostring(value)))
+      end
+      table.insert(sb, ", ")
+    end
+    if sb[#sb] == ", " then table.remove(sb) end
+    table.insert(sb, "} ");
+    return table.concat(sb)
+  else
+    return tostring(tt)
+  end
+end
 -- ===================================
 
 

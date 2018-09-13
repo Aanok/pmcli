@@ -389,6 +389,10 @@ end
 
 
 function PMCLI:get_menu_items(reply, parent_key)
+  if not reply.MediaContainer or not reply.MediaContainer.title1 then
+    return nil, "Unexpected reply to API request " .. self.options.base_addr .. parent_key .. ":\n" .. utils.tostring(reply)
+  end
+  
   local items = {}
   
   -- libraries and relevant views (All, By Album etc.)
@@ -465,6 +469,7 @@ function PMCLI:play_video(item)
   -- fetch metadata
   local body = assert(self:plex_request(item.key))
   local reply = assert(json.decode(body))
+  body = nil
   local metadata = assert(reply.MediaContainer and reply.MediaContainer.Metadata and reply.MediaContainer.Metadata[1],
                           "Unexpected reply to API request " .. self.options.base_addr .. item.key)
   reply = nil
@@ -520,9 +525,8 @@ function PMCLI:open_menu(parent_item)
   while true do
     local body = assert(self:plex_request(parent_item.key))
     local reply = assert(json.decode(body), "Malformed JSON reply to request " .. self.options.base_addr .. parent_item.key ..":\n" .. body)
-    assert(reply.MediaContainer and reply.MediaContainer.title1,
-           "Unexpected reply to API request " .. self.options.base_addr .. parent_item.key .. ":\n" .. body)
-    local items = self:get_menu_items(reply, parent_item.key)
+    body = nil
+    local items = assert(self:get_menu_items(reply, parent_item.key))
     reply = nil
     pmcli.print_menu(items)
     for _,c in ipairs(utils.read_commands()) do
