@@ -254,13 +254,13 @@ end
 -- token request
 function PMCLI:request_token(login, pass, id)
   local request = http_request.new_from_uri("https://plex.tv/users/sign_in.json")
-  request.headers:append("X-Plex-Client-Identifier", id)
-  request.headers:append("X-Plex-Product", "PMCLI")
-  request.headers:append("X-Plex-Version", PMCLI.VERSION)
+  request.headers:append("x-plex-client-identifier", id)
+  request.headers:append("x-plex-Product", "pmcli")
+  request.headers:append("x-plex-Version", PMCLI.VERSION)
   request.headers:delete(":method")
   request.headers:append(":method", "POST")
-  request.headers:append("Content-Type", "application/x-www-form-urlencoded")
-  request.headers:append("Accept", "application/json")
+  request.headers:append("content-type", "application/x-www-form-urlencoded")
+  request.headers:append("accept", "application/json")
   request:set_body("user%5blogin%5d=" .. http_encode(login) .. "&user%5bpassword%5d=" .. http_encode(pass))
   local headers, stream = request:go()
   if not headers then
