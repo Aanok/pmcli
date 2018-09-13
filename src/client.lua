@@ -10,6 +10,7 @@ local PMCLI = {
   pmcli [ --help ] ]]
 }
 
+
 -- ========== REQUIRES ==========
 -- lua-http for networking
 local http_request = require("http.request")
@@ -184,11 +185,11 @@ end
 
 -- headers for auth access
 function PMCLI:setup_headers(headers)
-  headers:append("X-Plex-Client-Identifier", self.options.unique_identifier)
-  headers:append("X-Plex-Product", "PMCLI")
-  headers:append("X-Plex-Version", PMCLI.VERSION)
-  headers:append("X-Plex-Token", self.options.plex_token, true)
-  headers:append("Accept", "application/json")
+  headers:append("x-plex-client-identifier", self.options.unique_identifier)
+  headers:append("x-plex-product", "pmcli")
+  headers:append("x-plex-version", PMCLI.VERSION)
+  headers:append("x-plex-token", self.options.plex_token, true)
+  headers:append("accept", "application/json")
 end
 
 
@@ -296,14 +297,14 @@ function PMCLI:plex_request(suffix)
   local headers, stream = request:go(10.0) -- 10 secs timeout
   if not headers then
     -- timeout or other network error of sorts
-    return nil, stream
+    return nil, "Network error on API request " .. self.options.base_addr .. suffix .. ":\n" .. stream
   end
   if headers:get(":status") == "200" then
     return stream:get_body_as_string()
   elseif headers:get(":status") == "401" then
-    self:quit("API request " .. self.options.base_addr .. suffix .. " returned error 401: unauthorized.\nYour token may have expired, consider logging in again by passing --login.")
+    return nil, "API request " .. self.options.base_addr .. suffix .. " returned error 401: unauthorized.\nYour token may have expired, consider logging in again by passing --login."
   else
-    self:quit("API request " .. self.options.base_addr .. suffix .. " returned error " .. headers:get(":status") .. ".")
+    return nil, "API request " .. self.options.base_addr .. suffix .. " returned error " .. headers:get(":status") .. "."
   end
 end
 
@@ -422,7 +423,7 @@ function PMCLI:get_menu_items(reply, parent_key)
         items[#items + 1] = {
           title = pmcli.compute_title(item),
           key = item.key,
-          tag = item.type:sub(1,1):upper()
+          tag = item.type:sub(1,1):upper() -- E, M
         }
       else
       -- some kind of directory; NB this includes when type is nil which, afaik, is only for folders in "By Folder" view
@@ -462,18 +463,11 @@ end
 
 function PMCLI:play_video(item)
   -- fetch metadata
-  local body, error_msg = self:plex_request(item.key)
-  if not body then
-    self:quit("Network error on API request " .. self.options.base_addr .. item.key .. ":\n" .. error_msg)
-  end
-  local reply = json.decode(body)
-  local metadata
-  if reply.MediaContainer and reply.MediaContainer.Metadata then
-    metadata = reply.MediaContainer.Metadata[1]
-    reply = nil
-  else
-    self:quit("Unexpected reply to API request " .. self.options.base_addr .. item.key)
-  end
+  local body = assert(self:plex_request(item.key))
+  local reply = assert(json.decode(body))
+  local metadata = assert(reply.MediaContainer and reply.MediaContainer.Metadata and reply.MediaContainer.Metadata[1],
+                          "Unexpected reply to API request " .. self.options.base_addr .. item.key)
+  reply = nil
   
   -- check if there are multiple versions for the requested item
   local choice = 1
@@ -505,7 +499,7 @@ function PMCLI:play_video(item)
     }
     for _,s in ipairs(p.Stream) do
       if s.streamType == 3 and s.key then
-        -- it's a subtitle
+        -- it's an external subtitle
         table.insert(stream_item.subs, self.options.base_addr .. s.key)
       end
     end
@@ -524,14 +518,10 @@ end
 
 function PMCLI:open_menu(parent_item)
   while true do
-    local body, error_msg = self:plex_request(parent_item.key)
-    if not body then
-      self:quit("Network error on API request " .. self.options.base_addr .. parent_item.key .. ":\n" .. error_msg)
-    end
-    local reply = json.decode(body)
-    if not reply.MediaContainer or not reply.MediaContainer.title1 then
-      self:quit("Unexpected reply to API request " .. self.options.base_addr .. parent_item.key .. ":\n" .. body)
-    end
+    local body = assert(self:plex_request(parent_item.key))
+    local reply = assert(json.decode(body), "Malformed JSON reply to request " .. self.options.base_addr .. parent_item.key ..":\n" .. body)
+    assert(reply.MediaContainer and reply.MediaContainer.title1,
+           "Unexpected reply to API request " .. self.options.base_addr .. parent_item.key .. ":\n" .. body)
     local items = self:get_menu_items(reply, parent_item.key)
     reply = nil
     pmcli.print_menu(items)
