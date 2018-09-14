@@ -309,35 +309,42 @@ function PMCLI:plex_request(suffix)
 end
 
 
-function PMCLI:mpv_socket_read_all(item)
-    repeat
+function PMCLI:sync_progress(item, msecs)
+  if item.duration and item.rating_key then
+  -- rating_key should always be there tbh, but duration might actually miss if
+  -- a metadata update is in progress or such
+    if msecs > item.duration * 0.975 then -- close enough to end, scrobble
+      local request = "/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library"
+      local ok, error_msg = self:plex_request(request)
+      if not ok then
+        io.stderr:write("[!] Network error on API request " .. request .. ":\n" .. error_msg .. "\n")
+      end
+    elseif msecs > item.duration * 0.025 then -- far enough from start, update viewOffset
+      local request = "/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library"
+      local ok, error_msg = self:plex_request(request)
+      if not ok then
+        io.stderr:write("[!] Network error on API request " .. request .. ":\n" .. error_msg .. "\n")
+      end
+    end
+  end
+end
+
+
+function PMCLI:mpv_socket_handle(item)
+  repeat
     local msg, err = self.mpv_socket:read()
     if msg == nil and err == 110 then
       -- timeout
       self.mpv_socket:clearerr()
-      return false
+      self.mpv_socket:write('{ "command": ["get_property", "playback-time"] }\n')
     elseif msg then
       local decoded = json.decode(msg)
       if decoded.data then -- reply to playback-time request
-        local msecs = math.floor(decoded.data*1000) -- secs from mpv, millisecs for plex
-        if msecs > item.duration * 0.975 then -- close enough to end, scrobble
-          local request = "/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library"
-          local ok, error_msg = self:plex_request(request)
-          if not ok then
-            io.stderr:write("[!] Network error on API request " .. request .. ":\n" .. error_msg .. "\n")
-          end
-        elseif msecs > item.duration * 0.025 then -- far enough from start, update viewOffset
-          local request = "/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library"
-          local ok, error_msg = self:plex_request(request)
-          if not ok then
-            io.stderr:write("[!] Network error on API request " .. request .. ":\n" .. error_msg .. "\n")
-          end
-        end
+        self:sync_progress(item, math.floor(decoded.data*1000))
       end
     end
   until msg == nil and err ~= 110 -- TODO: handle this
   self.mpv_socket:clearerr()
-  return true
 end
 
 
@@ -373,9 +380,7 @@ function PMCLI:play_media(item)
   if laps > 20 then
     io.stderr:write("[!] Couldn't reach IPC socket, won't sync progress to Plex server.\n")
   else
-    repeat
-      self.mpv_socket:write('{ "command": ["get_property", "playback-time"] }\n')
-    until self:mpv_socket_read_all(item)
+    self:mpv_socket_handle(item)
   end
 
   -- wait for mpv to exit; especially useful if IPC socket failed; still, abominably ugly
@@ -397,7 +402,8 @@ function PMCLI:get_menu_items(reply, parent_key)
   
   -- libraries and relevant views (All, By Album etc.)
   if reply.MediaContainer.Directory then
-    for _, item in ipairs(reply.MediaContainer.Directory) do
+    for i = 1,#reply.MediaContainer.Directory do
+      local item = reply.MediaContainer.Directory[i]
       items[#items + 1] = {
         title = pmcli.compute_title(item),
         key = pmcli.join_keys(parent_key, item.key),
@@ -411,7 +417,8 @@ function PMCLI:get_menu_items(reply, parent_key)
   end
   -- actual items
   if reply.MediaContainer.Metadata then
-    for _, item in ipairs(reply.MediaContainer.Metadata) do
+    for i = 1,#reply.MediaContainer.Metadata do
+      local item = reply.MediaContainer.Metadata[i]
       if item.type == "track" then
       -- audio: ready for streaming
         items[#items + 1] = {
