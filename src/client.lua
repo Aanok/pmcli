@@ -317,13 +317,13 @@ function PMCLI:sync_progress(item, msecs)
       local request = "/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library"
       local ok, error_msg = self:plex_request(request)
       if not ok then
-        io.stderr:write("[!] Network error on API request " .. request .. ":\n" .. error_msg .. "\n")
+        io.stderr:write("[!] " .. error_msg .. "\n")
       end
     elseif msecs > item.duration * 0.025 then -- far enough from start, update viewOffset
       local request = "/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library"
       local ok, error_msg = self:plex_request(request)
       if not ok then
-        io.stderr:write("[!] Network error on API request " .. request .. ":\n" .. error_msg .. "\n")
+        io.stderr:write("[!] " .. error_msg .. "\n")
       end
     end
   end
