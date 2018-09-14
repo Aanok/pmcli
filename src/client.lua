@@ -54,8 +54,8 @@ end
 function pmcli.print_menu(items)
   io.stdout:write("\n=== " .. items.title .. " ===\n")
   io.stdout:write(items.is_root and "0: quit\n" or "0: ..\n")
-  for i,item in ipairs(items) do
-    io.stdout:write(item.tag .. " " .. i .. ": " .. item.title .. "\n")
+  for i = 1,#items do
+    io.stdout:write(items[i].tag .. " " .. i .. ": " .. items[i].title .. "\n")
   end
 end
 
@@ -255,8 +255,8 @@ end
 function PMCLI:request_token(login, pass, id)
   local request = http_request.new_from_uri("https://plex.tv/users/sign_in.json")
   request.headers:append("x-plex-client-identifier", id)
-  request.headers:append("x-plex-Product", "pmcli")
-  request.headers:append("x-plex-Version", PMCLI.VERSION)
+  request.headers:append("x-plex-product", "pmcli")
+  request.headers:append("x-plex-version", PMCLI.VERSION)
   request.headers:delete(":method")
   request.headers:append(":method", "POST")
   request.headers:append("content-type", "application/x-www-form-urlencoded")
@@ -314,14 +314,12 @@ function PMCLI:sync_progress(item, msecs)
   -- rating_key should always be there tbh, but duration might actually miss if
   -- a metadata update is in progress or such
     if msecs > item.duration * 0.975 then -- close enough to end, scrobble
-      local request = "/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library"
-      local ok, error_msg = self:plex_request(request)
+      local ok, error_msg = self:plex_request("/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library")
       if not ok then
         io.stderr:write("[!] " .. error_msg .. "\n")
       end
     elseif msecs > item.duration * 0.025 then -- far enough from start, update viewOffset
-      local request = "/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library"
-      local ok, error_msg = self:plex_request(request)
+      local ok, error_msg = self:plex_request("/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library")
       if not ok then
         io.stderr:write("[!] " .. error_msg .. "\n")
       end
@@ -536,6 +534,7 @@ function PMCLI:open_menu(parent_item)
     local items = assert(self:get_menu_items(reply, parent_item.key))
     reply = nil
     pmcli.print_menu(items)
+    print(parent_item.key)
     for _,c in ipairs(utils.read_commands()) do
         if c == "q" then
           self:quit()
