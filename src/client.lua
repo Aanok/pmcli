@@ -534,7 +534,6 @@ function PMCLI:open_menu(parent_item)
     local items = assert(self:get_menu_items(reply, parent_item.key))
     reply = nil
     pmcli.print_menu(items)
-    print(parent_item.key)
     for _,c in ipairs(utils.read_commands()) do
         if c == "q" then
           self:quit()
