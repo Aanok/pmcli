@@ -393,7 +393,7 @@ end
 
 function PMCLI:get_menu_items(reply, parent_key)
   if not reply.MediaContainer or not reply.MediaContainer.title1 then
-    return nil, "Unexpected reply to API request " .. self.options.base_addr .. parent_key .. ":\n" .. utils.tostring(reply)
+    return nil, "Unexpected reply to API request " .. self.options.base_addr .. parent_key .. ":\n" .. utils.tostring(reply, true)
   end
   
   local items = {}

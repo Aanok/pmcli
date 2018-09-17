@@ -124,29 +124,43 @@ function utils.read_password()
 end
 
 
--- extension that also returns inline string representation of table tt
--- courtesy of http://lua-users.org/wiki/TableSerialization :)
-function utils.tostring(tt, done)
-  done = done or {}
+function utils.indent(tt, times)
+  for i = 1,times do
+    tt[#tt + 1] = " "
+  end
+  return tt
+end
+
+
+-- tostring extension that can also work on tables
+-- heavily based on code from http://lua-users.org/wiki/TableSerialization :)
+function utils.tostring(tt, inline, indent, done)
+  local sep = inline and " " or "\n"
+  indent = indent or 0
+  done = done or {} -- for cycle breaking
   if type(tt) == "table" then
     local sb = {}
-    sb[#sb + 1] = "{ "
+    sb = utils.indent(sb, indent)
+    sb[#sb + 1] = "{" .. sep
+    indent = not inline and indent + 2 or 0
     for key, value in pairs (tt) do
       if type(value) == "table" and not done[value] then
         done[value] = true
-        sb[#sb + 1] = utils.tostring(value, done)
+        sb[#sb + 1] = utils.tostring(value, inline, indent, done)
       elseif "number" == type(key) then
-        sb[#sb + 1] = string.format("\"%s\" ", tostring(value))
+        sb = utils.indent(sb, indent)
+        sb[#sb + 1] = string.format("\"%s\"", tostring(value))
       else
-        sb[#sb + 1] = string.format("%s = \"%s\" ", tostring (key), tostring(value))
+        sb = utils.indent(sb, indent)
+        sb[#sb + 1] = string.format("%s = \"%s\"", tostring(key), tostring(value))
       end
-      sb[#sb + 1] = ", "
+      sb[#sb + 1] = "," .. sep
     end
-    if sb[#sb] == ", " then
-      sb[#sb] = "} "
-    else
-      sb[#sb + 1] = "} "
+    if sb[#sb] == "," .. sep then
+      sb[#sb] = sep
     end
+    sb = utils.indent(sb, indent - 2)
+    sb[#sb + 1] = "}"
     return table.concat(sb)
   else
     return tostring(tt)
