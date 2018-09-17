@@ -166,7 +166,8 @@ function PMCLI:parse_args(args)
     if args[i] == "--login" then
       parsed_args.login = true
     elseif args[i] == "--help" then
-      self:quit(PMCLI.HELP_TEXT)
+      io.stdout:write(PMCLI.HELP_TEXT .. "\n")
+      self:quit()
     elseif args[i] == "--config" then
       -- next argument should be parameter
       if not args[i + 1] then
@@ -175,7 +176,7 @@ function PMCLI:parse_args(args)
       parsed_args.config_filename = args[i + 1]
       i = i + 1
     else
-      self:quit("Unrecognized command line option: " .. args[i])
+      self:quit("Unrecognized command line option: " .. args[i] .. "\n" .. PMCLI.HELP_TEXT)
     end
     i = i + 1
   end
@@ -284,7 +285,6 @@ function PMCLI:quit(error_message)
     io.stderr:write("[!!!] " .. error_message ..  "\n")
     os.exit(1)
   else
-    io.stdout:write("Bye!\n")
     os.exit(0)
   end
 end
