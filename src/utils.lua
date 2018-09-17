@@ -17,9 +17,10 @@ end
 function utils.flatten(t)
   if type(t) ~= "table" then return { t } end
   local flat = {}
-  for _,v1 in ipairs(t) do
-    for _,v2 in ipairs(utils.flatten(v1)) do
-      flat[#flat + 1] = v2
+  for i = 1, #t do
+    local t_i = utils.flatten(t[i])
+    for j = 1, #t_i do
+      flat[#flat + 1] = t_i[j]
     end
   end
   return flat
@@ -129,22 +130,23 @@ function utils.tostring(tt, done)
   done = done or {}
   if type(tt) == "table" then
     local sb = {}
-    table.insert(sb, "{ ")
+    sb[#sb + 1] = "{ "
     for key, value in pairs (tt) do
       if type(value) == "table" and not done[value] then
         done[value] = true
-        --table.insert(sb, "{ ");
-        table.insert(sb, utils.tostring(value, done))
-        --table.insert(sb, "} ");
+        sb[#sb + 1] = utils.tostring(value, done)
       elseif "number" == type(key) then
-        table.insert(sb, string.format("\"%s\" ", tostring(value)))
+        sb[#sb + 1] = string.format("\"%s\" ", tostring(value))
       else
-        table.insert(sb, string.format("%s = \"%s\" ", tostring (key), tostring(value)))
+        sb[#sb + 1] = string.format("%s = \"%s\" ", tostring (key), tostring(value))
       end
-      table.insert(sb, ", ")
+      sb[#sb + 1] = ", "
     end
-    if sb[#sb] == ", " then table.remove(sb) end
-    table.insert(sb, "} ");
+    if sb[#sb] == ", " then
+      sb[#sb] = "} "
+    else
+      sb[#sb + 1] = "} "
+    end
     return table.concat(sb)
   else
     return tostring(tt)
@@ -197,7 +199,7 @@ function utils.write_config(options, user_filename)
   file:close()
   
   if not os.execute("chmod 600 " .. config_filename) then
-    return nil, "[!] Error setting 600 permissions to " .. config_filename .. ", you may want to double-check", -2
+    return nil, "Error setting 600 permissions to " .. config_filename .. ", you may want to double-check", -2
   else
     return true
   end
