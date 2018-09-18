@@ -84,12 +84,22 @@ function pmcli.join_keys(s1, s2)
 end
 
 
-function pmcli.compute_title(item)
+function pmcli.compute_title(item, parent_item)
   if item.title then
     -- the item table is reasonable
     if item.title ~= "" then
       -- title field is filled, use it
-      return html_entities.decode(item.title)
+      if item.type == "episode" and parent_item.mixedParents and item.index and item.parentIndex then
+        -- we add season and episode number information to tv shows
+        -- mixedParents means the contex spans multiple seasons!
+        return string.format("S%02dE%02d - %s", item.parentIndex, item.index, html_entities.decode(item.title))
+      elseif item.type == "episode" and item.index then
+        -- we add episode number information to tv shows
+        -- note that season will be in section title
+        return string.format("E%02d - %s", item.index, html_entities.decode(item.title))
+      else
+        return html_entities.decode(item.title)
+      end
     elseif item.Media and item.Media[1].Part[1] then
       -- infer title from corresponding filename, like POSIX basename util
       return string.match(html_entities.decode(item.Media[1].Part[1].file), ".*/(.*)%..*")
@@ -438,7 +448,7 @@ function PMCLI:get_menu_items(reply, parent_key)
       elseif item.type == "episode" or item.type == "movie" then
       -- video: will require fetching metadata before streaming
         items[#items + 1] = {
-          title = pmcli.compute_title(item),
+          title = pmcli.compute_title(item, reply.MediaContainer),
           key = item.key,
           tag = item.type:sub(1,1):upper() -- E, M
         }
@@ -453,7 +463,14 @@ function PMCLI:get_menu_items(reply, parent_key)
     end
   end
 
-  items.title = html_entities.decode(reply.MediaContainer.title1)
+  -- section title
+  if reply.MediaContainer.title2 then
+    items.title = html_entities.decode(reply.MediaContainer.title1) ..  " - " .. html_entities.decode(reply.MediaContainer.title2)
+  else
+    items.title = html_entities.decode(reply.MediaContainer.title1)
+  end
+  
+  -- will determine if "0: .." or "0: quit"
   items.is_root = reply.MediaContainer.viewGroup == nil
   return items
 end
