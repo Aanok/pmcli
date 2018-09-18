@@ -7,7 +7,13 @@ local PMCLI = {
   VERSION = "0.1",
   HELP_TEXT = [[Usage:
   pmcli [ --login ] [ --config configuration_file ]
-  pmcli [ --help ] ]]
+  pmcli [ --help ] ]],
+  AMBIGUOUS_CONTEXTS = {
+    ["On Deck"] = true,
+    ["Recently Added"] = true,
+    ["Recently Aired"] = true,
+    ["Recently Viewed Episodes"] = true
+  }
 }
 
 
@@ -85,25 +91,35 @@ end
 
 
 function pmcli.compute_title(item, parent_item)
-  if item.title then
-    -- the item table is reasonable
-    if item.title ~= "" then
-      -- title field is filled, use it
-      if item.type == "episode" and parent_item.mixedParents and item.index and item.parentIndex then
-        -- we add season and episode number information to tv shows
-        -- mixedParents means the contex spans multiple seasons!
+  if item.title and item.title ~= "" then
+    -- title field is filled, use it
+    -- this should mean there is, generally speaking, available metadata
+    if item.type == "episode" then
+      -- for tv shows we want to show information on show title, season and episode number
+      if PMCLI.PROMISCUOUS_CONTEXTS[html_entities.decode(parent_item.title2)] and item.grandparentTitle and item.index and item.parentIndex then
+        -- menus where there is a jumble of shows and episodes, so we must show everything
+        return string.format("%s S%02dE%02d - %s",
+                            html_entities.decode(item.grandparentTitle),
+                            item.parentIndex,
+                            item.index,
+                            html_entities.decode(item.title))
+      elseif parent_item.mixedParents and item.index and item.parentIndex then
+        -- mixedParents marks a generic promiscuous context, but we ruled out cases where shows are mixed
+        -- so we only need season and episode
         return string.format("S%02dE%02d - %s", item.parentIndex, item.index, html_entities.decode(item.title))
-      elseif item.type == "episode" and item.index then
-        -- we add episode number information to tv shows
-        -- note that season will be in section title
+      elseif item.index then
+        -- here we should be in a specific season, so we only need the episode
         return string.format("E%02d - %s", item.index, html_entities.decode(item.title))
-      else
-        return html_entities.decode(item.title)
       end
-    elseif item.Media and item.Media[1].Part[1] then
-      -- infer title from corresponding filename, like POSIX basename util
-      return string.match(html_entities.decode(item.Media[1].Part[1].file), ".*/(.*)%..*")
+    elseif item.type == "movie" and item.year then
+      -- add year
+      return string.format("%s (%d)", html_entities.decode(item.title), item.year)
     end
+    -- either not ep or movie, or no need for or availability of further information
+    return html_entities.decode(item.title)
+  elseif item.Media and item.Media[1].Part[1] then
+    -- infer title from corresponding filename, like POSIX basename util
+    return string.match(html_entities.decode(item.Media[1].Part[1].file), ".*/(.*)%..*")
   end
   -- either malformed item table or no media file to infer from
   return "Unknown title"
