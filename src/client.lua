@@ -313,18 +313,26 @@ function PMCLI:sync_progress(item, msecs)
   if item.duration and item.rating_key then
   -- rating_key should always be there tbh, but duration might actually miss if
   -- a metadata update is in progress or such
-    if msecs > item.duration * 0.975 then -- close enough to end, scrobble
-      local ok, error_msg = self:plex_request("/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library")
-      if not ok then
-        io.stderr:write("[!] " .. error_msg .. "\n")
-      end
-    elseif msecs > item.duration * 0.025 then -- far enough from start, update viewOffset
-      local ok, error_msg = self:plex_request("/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library")
-      if not ok then
-        io.stderr:write("[!] " .. error_msg .. "\n")
+    if not item.last_sync or item.last_sync ~= msecs then
+    -- there is actual progress to update
+      if msecs > item.duration * 0.975 then -- close enough to end, scrobble
+        local ok, error_msg = self:plex_request("/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library")
+        if not ok then
+          io.stderr:write("[!] " .. error_msg .. "\n")
+        else
+          item.last_sync = nil
+        end
+      elseif msecs > item.duration * 0.025 then -- far enough from start, update viewOffset
+        local ok, error_msg = self:plex_request("/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library")
+        if not ok then
+          io.stderr:write("[!] " .. error_msg .. "\n")
+        else
+          item.last_sync = msecs
+        end
       end
     end
   end
+  return item
 end
 
 
@@ -338,7 +346,7 @@ function PMCLI:mpv_socket_handle(item)
     elseif msg then
       local decoded = json.decode(msg)
       if decoded.data then -- reply to playback-time request
-        self:sync_progress(item, math.floor(decoded.data*1000))
+        item = self:sync_progress(item, math.floor(decoded.data*1000))
       end
     end
   until msg == nil and err ~= 110 -- TODO: handle this
