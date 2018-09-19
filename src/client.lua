@@ -114,8 +114,17 @@ function pmcli.compute_title(item, parent_item)
     elseif item.type == "movie" and item.year then
       -- add year
       return string.format("%s (%d)", html_entities.decode(item.title), item.year)
+    elseif item.type == "album" and parent_item.mixedParents and item.parentTitle then
+      -- prefix with artist name
+      return string.format("%s - %s", html_entities.decode(item.parentTitle), html_entities.decode(item.title))
+    elseif item.type == "track" and parent_item.mixedParents and item.grandparentTitle and item.parentTitle then
+      -- prefix with artist name and album
+      return string.format("%s - %s - %s",
+                          html_entities.decode(item.grandparentTitle),
+                          html_entities.decode(item.parentTitle),
+                          html_entities.decode(item.title))
     end
-    -- either not ep or movie, or no need for or availability of further information
+    -- no need for or availability of further information
     return html_entities.decode(item.title)
   elseif item.Media and item.Media[1].Part[1] then
     -- infer title from corresponding filename, like POSIX basename util
@@ -134,7 +143,7 @@ function pmcli.new(args)
   local self = {}
   setmetatable(self, { __index = PMCLI })
   
-  -- first, read 
+  -- first, read CLI arguments
   local parsed_args = self:parse_args(args)
   
   -- setup options from config file
@@ -173,6 +182,8 @@ function pmcli.new(args)
   end
   
   self.mpv_socket_name = os.tmpname()
+  
+  self.options.debug_mode = parsed_args.debug_mode
   
   return self
 end
@@ -426,18 +437,19 @@ end
 
 
 function PMCLI:get_menu_items(reply, parent_key)
-  if not reply.MediaContainer or not reply.MediaContainer.title1 then
+  local mc = reply.MediaContainer
+  if not mc or not mc.title1 then
     return nil, "Unexpected reply to API request " .. self.options.base_addr .. parent_key .. ":\n" .. utils.tostring(reply, true)
   end
   
   local items = {}
   
   -- libraries and relevant views (All, By Album etc.)
-  if reply.MediaContainer.Directory then
-    for i = 1,#reply.MediaContainer.Directory do
-      local item = reply.MediaContainer.Directory[i]
+  if mc.Directory then
+    for i = 1,#mc.Directory do
+      local item = mc.Directory[i]
       items[#items + 1] = {
-        title = pmcli.compute_title(item),
+        title = pmcli.compute_title(item, mc),
         key = pmcli.join_keys(parent_key, item.key),
       }
       if item.search then
@@ -448,13 +460,13 @@ function PMCLI:get_menu_items(reply, parent_key)
     end
   end
   -- actual items
-  if reply.MediaContainer.Metadata then
-    for i = 1,#reply.MediaContainer.Metadata do
-      local item = reply.MediaContainer.Metadata[i]
+  if mc.Metadata then
+    for i = 1,#mc.Metadata do
+      local item = mc.Metadata[i]
       if item.type == "track" then
       -- audio: ready for streaming
         items[#items + 1] = {
-          title = pmcli.compute_title(item),
+          title = pmcli.compute_title(item, mc),
           duration = item.duration,
           view_offset = item.viewOffset,
           rating_key = item.ratingKey,
@@ -464,14 +476,14 @@ function PMCLI:get_menu_items(reply, parent_key)
       elseif item.type == "episode" or item.type == "movie" then
       -- video: will require fetching metadata before streaming
         items[#items + 1] = {
-          title = pmcli.compute_title(item, reply.MediaContainer),
+          title = pmcli.compute_title(item, mc),
           key = item.key,
           tag = item.type:sub(1,1):upper() -- E, M
         }
       else
       -- some kind of directory; NB this includes when type is nil which, afaik, is only for folders in "By Folder" view
         items[#items + 1] = {
-          title = pmcli.compute_title(item),
+          title = pmcli.compute_title(item, mc),
           key = item.key,
           tag = "D"
         }
@@ -480,14 +492,14 @@ function PMCLI:get_menu_items(reply, parent_key)
   end
 
   -- section title
-  if reply.MediaContainer.title2 then
-    items.title = html_entities.decode(reply.MediaContainer.title1) ..  " - " .. html_entities.decode(reply.MediaContainer.title2)
+  if mc.title2 then
+    items.title = html_entities.decode(mc.title1) ..  " - " .. html_entities.decode(mc.title2)
   else
-    items.title = html_entities.decode(reply.MediaContainer.title1)
+    items.title = html_entities.decode(mc.title1)
   end
   
   -- will determine if "0: .." or "0: quit"
-  items.is_root = reply.MediaContainer.viewGroup == nil
+  items.is_root = mc.viewGroup == nil
   return items
 end
 
