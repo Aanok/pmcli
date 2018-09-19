@@ -96,7 +96,7 @@ function pmcli.compute_title(item, parent_item)
     -- this should mean there is, generally speaking, available metadata
     if item.type == "episode" then
       -- for tv shows we want to show information on show title, season and episode number
-      if PMCLI.PROMISCUOUS_CONTEXTS[html_entities.decode(parent_item.title2)] and item.grandparentTitle and item.index and item.parentIndex then
+      if PMCLI.AMBIGUOUS_CONTEXTS[html_entities.decode(parent_item.title2)] and item.grandparentTitle and item.index and item.parentIndex then
         -- menus where there is a jumble of shows and episodes, so we must show everything
         return string.format("%s S%02dE%02d - %s",
                             html_entities.decode(item.grandparentTitle),
