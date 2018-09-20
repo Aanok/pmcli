@@ -6,4 +6,3 @@
 for audio only because it is incompatible with specifying subtitles :( )
 * Look into websocket interface?
 * Support transcoding (o mama!)
-* Call "stty -g" in io.popen to get accurate values to restore to instead of forcing stty sane
