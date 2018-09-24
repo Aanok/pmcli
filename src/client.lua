@@ -352,14 +352,14 @@ function PMCLI:sync_progress(item, msecs)
   -- a metadata update is in progress or such
     if not item.last_sync or item.last_sync ~= msecs then
     -- there is actual progress to update
-      if msecs > item.duration * 0.975 then -- close enough to end, scrobble
+      if msecs > item.duration * 0.95 then -- close enough to end, scrobble
         local ok, error_msg = self:plex_request("/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library")
         if not ok then
           io.stderr:write("[!] " .. error_msg .. "\n")
         else
           item.last_sync = nil
         end
-      elseif msecs > item.duration * 0.025 then -- far enough from start, update viewOffset
+      elseif msecs > item.duration * 0.05 then -- far enough from start, update viewOffset
         local ok, error_msg = self:plex_request("/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library")
         if not ok then
           io.stderr:write("[!] " .. error_msg .. "\n")
