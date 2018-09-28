@@ -490,7 +490,13 @@ function PMCLI:play_video(item)
     -- there are multiple versions and the user must choose
     io.stdout:write("\nThere are multiple versions for " .. item.title .. ":\n")
     for i,m in ipairs(metadata.Media) do
-      io.stdout:write(i .. ": " .. m.width .. "x" .. m.height .. " " .. m.videoCodec .. ", " ..  m.audioChannels .. " channel " .. m.audioCodec .. ", " .. m.bitrate .. "kbps\n")
+      local width = m.width or "unknown width "
+      local height = m.height or "unkown height "
+      local video_codec = m.videoCodec or "unknown codec"
+      local audio_channels = m.audioChannels or "unknown"
+      local audio_codec = m.audioCodec or "unknown codec"
+      local bitrate = m.bitrate and m.bitrate .. "kbps" or "unknown bitrate"
+      io.stdout:write(i .. ": " .. width .. "x" .. height .. " " .. video_codec .. ", " ..  audio_channels .. " channel " .. audio_codec .. ", " .. bitrate .. "\n")
     end
     -- user choice
     io.stdout:write("Please select one for playback: ")
