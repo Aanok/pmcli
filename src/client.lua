@@ -42,54 +42,6 @@ local http_encode = require("http.util").encodeURIComponent
 
 
 -- ========== CONVENIENCIES ==========
--- conveniency for simple y/n confirmation dialogs
-function pmcli.confirm_yn(msg)
-  io.stdout:write(msg .. " [y/n]\n")
-  repeat
-    yn = io.read()
-  until yn == "y" or yn == "n"
-  return yn == "y"
-end
-
-
-function pmcli.msecs_to_time(ms)
-  return os.date("%T", math.floor(ms/1000) - 3600) -- H:M:S, epoch was at 1AM
-end
-
-
-function pmcli.print_menu(items)
-  io.stdout:write("\n=== " .. items.title .. " ===\n")
-  io.stdout:write(items.is_root and "0: quit\n" or "0: ..\n")
-  for i = 1,#items do
-    io.stdout:write(items[i].tag .. " " .. i .. ": " .. items[i].title .. "\n")
-  end
-end
-
-
-function pmcli.join_keys(s1, s2)
-  local i = 0
-  local match_length = -1
-  -- preprocessing: remove leading /
-  if s1:sub(1,1) == "/" then s1 = s1:sub(2) end
-  if s2:sub(1,1) == "/" then s2 = s2:sub(2) end
-  for i = 1, math.min(#s1, #s2) do
-    if s1:sub(1,i) == s2:sub(1,i) then
-      match_length = i
-    elseif match_length ~= -1 then
-      -- there's been a match before, so that was the overlap
-      break
-    end
-  end
-  if match_length == -1 then
-    return "/" .. s1 .. "/" .. s2
-  elseif match_length == #s2 then
-    return "/" .. s2
-  else
-    return "/" .. s1:sub(1, match_length) .. s2:sub(match_length + 1)
-  end
-end
-
-
 function pmcli.compute_title(item, parent_item)
   if item.title and item.title ~= "" then
     -- title field is filled, use it
@@ -236,7 +188,7 @@ function PMCLI:login()
   local unique_identifier = "pmcli-" .. PMCLI.VERSION .. "-" .. utils.generate_random_id()
   repeat 
     io.stdout:write("\nPlease enter your Plex account name or email.\n")
-    local login = io.read()
+    local login = utils.read()
     io.stdout:write("\nPlease enter your Plex account password.\n")
     local password, errmsg = utils.read_password()
     if not password then
@@ -245,7 +197,7 @@ function PMCLI:login()
     plex_token, errmsg = self:request_token(login, password, unique_identifier)
     if not plex_token then
       io.stderr:write("[!!] Authentication error:\n", errmsg .. "\n")
-      if not pmcli.confirm_yn("Would you like to try again with new credentials?") then
+      if not utils.confirm_yn("Would you like to try again with new credentials?") then
         self:quit("Configuration was unsuccessful.")
       end
     end
@@ -258,7 +210,7 @@ end
 
 
 function PMCLI:first_time_config(skip_prompt, user_filename)
-  if not skip_prompt and not pmcli.confirm_yn("\nConfiguration file not found. Would you like to proceed with configuration and login?") then
+  if not skip_prompt and not utils.confirm_yn("\nConfiguration file not found. Would you like to proceed with configuration and login?") then
     self:quit()
   end
   
@@ -267,7 +219,7 @@ function PMCLI:first_time_config(skip_prompt, user_filename)
   local uri_patt = require("lpeg_patterns.uri").uri * -1
   io.stdout:write("\nPlease enter an address (and port if not default) to access your Plex Media Server.\nIt should look like https://example.com:32400 .\n")
   repeat
-    options.base_addr = io.read()
+    options.base_addr = utils.read()
     if not uri_patt:match(options.base_addr) then
       io.stderr:write("[!!] Malformed URI. Please try again.\n")
     end
@@ -275,7 +227,7 @@ function PMCLI:first_time_config(skip_prompt, user_filename)
   
   options.plex_token, options.unique_identifier = self:login()
   
-  options.require_hostname_validation = not pmcli.confirm_yn("\nDo you need PMCLI to ignore hostname validation (must e.g. if using builtin SSL certificate)?")
+  options.require_hostname_validation = not utils.confirm_yn("\nDo you need PMCLI to ignore hostname validation (must e.g. if using builtin SSL certificate)?")
   
   io.stdout:write("\nCommitting configuration to disk...\n")
   local ok, error_message, error_code = utils.write_config(options, user_filename)
@@ -394,8 +346,8 @@ end
 function PMCLI:play_media(item)
 -- this whole mechanism is a mess. look into something better.
   local mpv_args = "--input-ipc-server=" .. self.mpv_socket_name
-  if item.view_offset and pmcli.confirm_yn("The item is set as partially viewed. Would you like to resume at " .. pmcli.msecs_to_time(item.view_offset) .. "?") then
-    mpv_args = mpv_args .. " --start=" .. pmcli.msecs_to_time(item.view_offset)
+  if item.view_offset and utils.confirm_yn("The item is set as partially viewed. Would you like to resume at " .. utils.msecs_to_time(item.view_offset) .. "?") then
+    mpv_args = mpv_args .. " --start=" .. utils.msecs_to_time(item.view_offset)
   end
   mpv_args = mpv_args .. " " .. '--title="' .. item.title .. '"'
   mpv_args = mpv_args .. " --http-header-fields='X-Plex-Token: " .. self.options.plex_token .. "'"
@@ -450,7 +402,7 @@ function PMCLI:get_menu_items(reply, parent_key)
       local item = mc.Directory[i]
       items[#items + 1] = {
         title = pmcli.compute_title(item, mc),
-        key = pmcli.join_keys(parent_key, item.key),
+        key = utils.join_keys(parent_key, item.key),
       }
       if item.search then
         items[#items].tag = "?"
@@ -470,7 +422,7 @@ function PMCLI:get_menu_items(reply, parent_key)
           duration = item.duration,
           view_offset = item.viewOffset,
           rating_key = item.ratingKey,
-          part_keys = { pmcli.join_keys(parent_key, item.Media[1].Part[1].key) },
+          part_keys = { utils.join_keys(parent_key, item.Media[1].Part[1].key) },
           tag = "T"
         }
       elseif item.type == "episode" or item.type == "movie" then
@@ -543,7 +495,7 @@ function PMCLI:play_video(item)
     -- user choice
     io.stdout:write("Please select one for playback: ")
     repeat
-      choice = tonumber(io.read())
+      choice = tonumber(utils.read())
       if not choice or choice < 1 or choice > #(metadata.Media) then
         io.stderr:write("[!!] Invalid choice.\n")
       end
@@ -572,7 +524,7 @@ end
 
 
 function PMCLI:local_search(search_item)
-  io.stdout:write("Please enter your search query: ");
+  io.stdout:write("Query? > ");
   local query = "&query=" .. http_encode(io.read())
   search_item.key = search_item.key .. query
   self:open_menu(search_item)
@@ -586,7 +538,7 @@ function PMCLI:open_menu(parent_item)
     body = nil
     local items = assert(self:get_menu_items(reply, parent_item.key))
     reply = nil
-    pmcli.print_menu(items)
+    utils.print_menu(items)
     for _,c in ipairs(utils.read_commands()) do
         if c == "q" then
           self:quit()

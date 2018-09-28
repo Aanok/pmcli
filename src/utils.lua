@@ -49,10 +49,10 @@ utils.command_list = lpeg.Ct({
 
 
 function utils.read_commands()
-  local commands = utils.command_list:match(io.read())
+  local commands = utils.command_list:match(utils.read())
   while not commands do
     io.stderr:write("[!!] Malformed command string, please try again.\n")
-    commands = utils.command_list:match(io.read())
+    commands = utils.command_list:match(utils.read())
   end
   return commands
 end
@@ -81,6 +81,60 @@ function utils.generate_random_id()
 end
 
 
+function utils.msecs_to_time(ms)
+  return os.date("%T", math.floor(ms/1000) - 3600) -- H:M:S, epoch was at 1AM
+end
+
+
+function utils.join_keys(s1, s2)
+  local i = 0
+  local match_length = -1
+  -- preprocessing: remove leading /
+  if s1:sub(1,1) == "/" then s1 = s1:sub(2) end
+  if s2:sub(1,1) == "/" then s2 = s2:sub(2) end
+  for i = 1, math.min(#s1, #s2) do
+    if s1:sub(1,i) == s2:sub(1,i) then
+      match_length = i
+    elseif match_length ~= -1 then
+      -- there's been a match before, so that was the overlap
+      break
+    end
+  end
+  if match_length == -1 then
+    return "/" .. s1 .. "/" .. s2
+  elseif match_length == #s2 then
+    return "/" .. s2
+  else
+    return "/" .. s1:sub(1, match_length) .. s2:sub(match_length + 1)
+  end
+end
+-- ===================================
+
+
+-- ========== IO ==========
+function utils.print_menu(items)
+  io.stdout:write("\n=== " .. items.title .. " ===\n")
+  io.stdout:write(items.is_root and "0: quit\n" or "0: ..\n")
+  for i = 1,#items do
+    io.stdout:write(items[i].tag .. " " .. i .. ": " .. items[i].title .. "\n")
+  end
+end
+
+function utils.confirm_yn(msg, default)
+  io.stdout:write(msg .. " [y/n]\n")
+  repeat
+    yn = utils.read()
+  until yn == "y" or yn == "n"
+  return yn == "y"
+end
+
+
+function utils.read(mode)
+  io.stdout:write("> ")
+  return io.read(mode and mode or "*l")
+end
+
+
 function utils.read_utf8_char(file)
   local len = 1
   local char = file:read(1)
@@ -100,6 +154,7 @@ function utils.read_password()
   local len = 0
   local prev_len, ch
   os.execute("stty -echo raw")
+  io.stdout:write("> ")
   repeat
     prev_len = len
     ch, len = utils.read_utf8_char(io.stdin)
@@ -166,7 +221,7 @@ function utils.tostring(tt, inline, indent, done)
     return tostring(tt)
   end
 end
--- ===================================
+-- ========================
 
 
 -- ========== CONFIG FILE ===========
