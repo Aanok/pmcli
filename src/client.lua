@@ -143,7 +143,6 @@ end
 
 function PMCLI:connect_mpv_socket()
   self.mpv_socket = socket.connect({ path = self.mpv_socket_name })
-  --self.mpv_socket:settimeout(10.0)
 end
 
 
@@ -302,7 +301,7 @@ function PMCLI:sync_progress(item, msecs)
   if item.duration and item.rating_key then
   -- rating_key should always be there tbh, but duration might actually miss if
   -- a metadata update is in progress or such
-    if not item.last_sync or item.last_sync ~= msecs then
+    if not item.last_sync or math.abs(item.last_sync - msecs) > 10000 then
     -- there is actual progress to update
       if msecs > item.duration * 0.95 then -- close enough to end, scrobble
         local ok, error_msg = self:plex_request("/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library")
@@ -328,14 +327,13 @@ end
 function PMCLI:mpv_socket_handle(item)
   -- issue initial check
   self.mpv_socket:write('{ "command": ["get_property", "playback-time"] }\n')
-  for msg, err in self.mpv_socket:lines() do
+  local msg, err
+  repeat
+    msg, err = self.mpv_socket:read()
     if msg == nil and err == 110 then
       -- timeout
       self.mpv_socket:clearerr()
       self.mpv_socket:write('{ "command": ["get_property", "playback-time"] }\n')
-    elseif msg == nil and err ~= 110 then
-      self.mpv_socket:clearerr()
-      return msg, err
     elseif msg then
       local decoded = json.decode(msg)
       if decoded.data then -- reply to playback-time request
@@ -344,13 +342,12 @@ function PMCLI:mpv_socket_handle(item)
         self.mpv_socket:write('{ "command": ["get_property", "playback-time"] }\n')
       end
     end
-  end
-  return true
+  until msg == nil and err ~= 110
+  return self.mpv_socket:eof(), err
 end
 
 
 function PMCLI:play_media(item)
--- this whole mechanism is a mess. look into something better.
   local mpv_args = "--input-ipc-server=" .. self.mpv_socket_name
   if item.view_offset and utils.confirm_yn("The item is set as partially viewed. Would you like to resume at " .. utils.msecs_to_time(item.view_offset) .. "?") then
     mpv_args = mpv_args .. " --start=" .. utils.msecs_to_time(item.view_offset)
@@ -372,8 +369,7 @@ function PMCLI:play_media(item)
   -- run mpv SYNCHRONOUSLY in its own thread
   local mpv_thread = thread.start(function(con, mpv_args)
     -- signals are blocked by default in new threads, so we unblock SIGINT
-    -- note that execute puts mpv in the foreground, so the main thread
-    -- does not receive signals anymore
+    -- note that the main thread does not receive signals anymore as well
     local signal = require("cqueues.signal")
     signal.unblock(signal.SIGINT)
     os.execute("mpv " .. mpv_args)
