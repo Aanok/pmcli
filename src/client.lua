@@ -326,20 +326,26 @@ end
 
 
 function PMCLI:mpv_socket_handle(item)
-  repeat
-    local msg, err = self.mpv_socket:read()
+  -- issue initial check
+  self.mpv_socket:write('{ "command": ["get_property", "playback-time"] }\n')
+  for msg, err in self.mpv_socket:lines() do
     if msg == nil and err == 110 then
       -- timeout
       self.mpv_socket:clearerr()
       self.mpv_socket:write('{ "command": ["get_property", "playback-time"] }\n')
+    elseif msg == nil and err ~= 110 then
+      self.mpv_socket:clearerr()
+      return msg, err
     elseif msg then
       local decoded = json.decode(msg)
       if decoded.data then -- reply to playback-time request
         item = self:sync_progress(item, math.floor(decoded.data*1000))
+      elseif decoded.event == "seek" then
+        self.mpv_socket:write('{ "command": ["get_property", "playback-time"] }\n')
       end
     end
-  until msg == nil and err ~= 110 -- TODO: handle this
-  self.mpv_socket:clearerr()
+  end
+  return true
 end
 
 
@@ -384,7 +390,12 @@ function PMCLI:play_media(item)
   if joined then
     io.stderr:write("[!] Couldn't reach IPC socket, playback progress was not synced to Plex server.\n")
   else
-    self:mpv_socket_handle(item)
+    local ok, err = self:mpv_socket_handle(item)
+    if not ok then
+      err = require("cqueues.errno").strerror(err)
+      io.stderr:write("[!] IPC socket error: " .. err ..". Playback sync halted.\n" )
+      -- TODO: improve this
+    end
   end
 
   -- innocuous if already joined
