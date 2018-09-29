@@ -30,11 +30,11 @@ local json = require("dkjson").use_lpeg()
 -- our own utils
 local utils = require("pmcli.utils")
 
--- for now at least, a necessary evil
-local sleep = require("cqueues").sleep
-
 -- mpv IPC
 local socket = require("cqueues.socket")
+
+-- to drive mpv in parallel
+local thread = require("cqueues.thread")
 
 -- HTTP URL escaping
 local http_encode = require("http.util").encodeURIComponent
@@ -133,9 +133,9 @@ function pmcli.new(args)
     self.ssl_context:setVerify(require("openssl.ssl.context").VERIFY_NONE)
   end
   
+  -- IPC socket
   self.mpv_socket_name = os.tmpname()
-  
-  self.options.debug_mode = parsed_args.debug_mode
+  socket.settimeout(10.0) -- new default
   
   return self
 end
@@ -143,7 +143,7 @@ end
 
 function PMCLI:connect_mpv_socket()
   self.mpv_socket = socket.connect({ path = self.mpv_socket_name })
-  self.mpv_socket:settimeout(10.0)
+  --self.mpv_socket:settimeout(10.0)
 end
 
 
@@ -363,28 +363,32 @@ function PMCLI:play_media(item)
     mpv_args = mpv_args .. " " .. self.options.base_addr .. k
   end
   
-  os.execute("mpv " .. mpv_args .. " &")
+  -- run mpv SYNCHRONOUSLY in its own thread
+  local mpv_thread = thread.start(function(con, mpv_args)
+    -- signals are blocked by default in new threads, so we unblock SIGINT
+    -- note that execute puts mpv in the foreground, so the main thread
+    -- does not receive signals anymore
+    local signal = require("cqueues.signal")
+    signal.unblock(signal.SIGINT)
+    os.execute("mpv " .. mpv_args)
+  end, mpv_args)
+  
   -- wait for mpv to setup the socket
+  -- we will persevere for as long as mpv is running
   self:connect_mpv_socket()
-  local laps = 0
-  repeat
-    sleep(0.25)
-    laps = laps + 1
-  until self.mpv_socket:peername() or laps > 20 -- after 5 seconds, we recognize a failure. very ugly.
-  -- sync loop
-  if laps > 20 then
-    io.stderr:write("[!] Couldn't reach IPC socket, won't sync progress to Plex server.\n")
+  local joined = mpv_thread:join(0.5) -- if things go smooth this is enough
+  while not self.mpv_socket:peername() and not joined do
+    joined = mpv_thread:join(5.0) -- if there's a problem, we give it a lot of time
+  end
+  
+  if joined then
+    io.stderr:write("[!] Couldn't reach IPC socket, playback progress was not synced to Plex server.\n")
   else
     self:mpv_socket_handle(item)
   end
 
-  -- wait for mpv to exit; especially useful if IPC socket failed; still, abominably ugly
-  -- note: the full process name gets cut, but the socket name is unique so it is enough as an identifier
-  while os.execute("pkill -0 -f 'mpv --input-ipc-server=" .. self.mpv_socket_name .. "'") do
-    sleep(0.5)
-  end
-  
-  os.execute("stty " .. utils.stty_save) -- really, really ugly
+  -- innocuous if already joined
+  mpv_thread:join()
 end
 
 
