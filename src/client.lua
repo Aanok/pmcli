@@ -13,6 +13,9 @@ local PMCLI = {
     ["Recently Added"] = true,
     ["Recently Aired"] = true,
     ["Recently Viewed Episodes"] = true
+  },
+  IPC = {
+    GET_PLAYBACK_TIME = '{ "command": ["get_property", "playback-time"], "request_id": 1 }\n'
   }
 }
 
@@ -265,7 +268,7 @@ end
 -- ===========================
 
 
--- ========== FUNCTIONS ==========
+-- ========== MEMBERS ==========
 function PMCLI:quit(error_message)
   if self.mpv_socket_name then os.remove(self.mpv_socket_name) end
   os.execute("stty " .. utils.stty_save) -- in case of fatal errors while mpv is running
@@ -299,7 +302,7 @@ end
 
 function PMCLI:sync_progress(item, msecs)
   if item.duration and item.rating_key then
-  -- rating_key should always be there tbh, but duration might actually miss if
+  -- rating_key should always be there tbh, but duration might actually be missing if
   -- a metadata update is in progress or such
     if not item.last_sync or math.abs(item.last_sync - msecs) > 10000 then
     -- there is actual progress to update
@@ -324,22 +327,52 @@ function PMCLI:sync_progress(item, msecs)
 end
 
 
-function PMCLI:mpv_socket_handle(item)
-  -- issue initial check
-  self.mpv_socket:write('{ "command": ["get_property", "playback-time"] }\n')
+function PMCLI:mpv_socket_handle(playlist)
+  local pos = 1
+  local must_ask_offset = false
   local msg, err
+  
   repeat
     msg, err = self.mpv_socket:read()
     if msg == nil and err == 110 then
       -- timeout
       self.mpv_socket:clearerr()
-      self.mpv_socket:write('{ "command": ["get_property", "playback-time"] }\n')
+      self.mpv_socket:write(PMCLI.IPC.GET_PLAYBACK_TIME)
     elseif msg then
       local decoded = json.decode(msg)
-      if decoded.data then -- reply to playback-time request
-        item = self:sync_progress(item, math.floor(decoded.data*1000))
+      --print(msg)
+      if decoded.event == "property-change" and decoded.id == 1 then
+        -- playlist-pos-1
+        pos = decoded.data
+        if pos ~= 1 and playlist[pos].view_offset then
+          -- there is a bookmark, so we must prompt the user about it
+          -- but note: the first item's already been taken care of
+          -- mpv's term-playing-msg, tracks and tags will be shown before the prompt
+          self.mpv_socket:write('{ "command": ["set_property", "pause", true] }\n')
+          must_ask_offset = true
+        end
+      elseif must_ask_offset and decoded.event == "pause" then
+        -- mpv has written its header and is about to print term-status-msg
+        -- which we don't want because it will interleave and overlap with our I/O
+        -- so we disable mpv's terminal functionalities altogether (in,err,out)
+        self.mpv_socket:write('{ "command": ["set_property", "terminal", false] }\n')
+        local offset_time = utils.msecs_to_time(playlist[pos].view_offset)
+        -- mpv disables tty echo and maybe other functionalities
+        local mpv_stty = utils.save_stty()
+        os.execute("stty " .. utils.stty_save)
+        if utils.confirm_yn("\n" .. playlist[pos].title .. " is set as partially viewed. Would you like to resume at " .. offset_time .. "?") then
+          self.mpv_socket:write(string.format('{ "command": ["seek", "%s"] }\n', offset_time))
+        end
+        io.stdout:write("\n")
+        os.execute("stty " .. mpv_stty)
+        must_ask_offset = false
+        self.mpv_socket:write('{ "command": ["set_property", "terminal", true] }\n')
+        self.mpv_socket:write('{ "command": ["set_property", "pause", false] }\n')
       elseif decoded.event == "seek" then
-        self.mpv_socket:write('{ "command": ["get_property", "playback-time"] }\n')
+        self.mpv_socket:write(PMCLI.IPC.GET_PLAYBACK_TIME)
+      elseif decoded.request_id == 1 and decoded.error == "success" then
+        -- good reply to playback-time request
+        item = self:sync_progress(playlist[pos], math.floor(decoded.data*1000))
       end
     end
   until msg == nil and err ~= 110
@@ -347,23 +380,31 @@ function PMCLI:mpv_socket_handle(item)
 end
 
 
-function PMCLI:play_media(item)
+function PMCLI:play_media(playlist)
   local mpv_args = "--input-ipc-server=" .. self.mpv_socket_name
-  if item.view_offset and utils.confirm_yn("The item is set as partially viewed. Would you like to resume at " .. utils.msecs_to_time(item.view_offset) .. "?") then
-    mpv_args = mpv_args .. " --start=" .. utils.msecs_to_time(item.view_offset)
+  
+  mpv_args = mpv_args .. " --http-header-fields='x-plex-token: " .. self.options.plex_token .. "'"
+  
+  -- bookmark
+  if playlist[1].view_offset and utils.confirm_yn(playlist[1].title .. " is set as partially viewed. Would you like to resume at " .. utils.msecs_to_time(playlist[1].view_offset) .. "?") then
+    mpv_args = mpv_args .. " --start=" .. utils.msecs_to_time(playlist[1].view_offset)
   end
-  mpv_args = mpv_args .. " " .. '--title="' .. item.title .. '"'
-  mpv_args = mpv_args .. " --http-header-fields='X-Plex-Token: " .. self.options.plex_token .. "'"
   
   -- subs for video
-  if item.subs then
-    for _,s in ipairs(item.subs) do
+  if playlist[1].subs then
+    for _,s in ipairs(playlist[1].subs) do
       mpv_args = mpv_args .. " --sub-file=" .. s
     end
   end
-  -- one part for video, many for audio playlist
-  for _,k in ipairs(item.part_keys) do
-    mpv_args = mpv_args .. " " .. self.options.base_addr .. k
+  
+  -- parts
+  for _,item in ipairs(playlist) do
+    mpv_args = mpv_args .. " " .. self.options.base_addr .. item.part_key
+  end
+  
+  -- notify user if running a playlist
+  if #playlist > 1 then
+    io.stdout:write("\n-- " .. #playlist .. " tracks have been gathered in an mpv playlist --\n\n")
   end
   
   -- run mpv SYNCHRONOUSLY in its own thread
@@ -386,7 +427,11 @@ function PMCLI:play_media(item)
   if joined then
     io.stderr:write("[!] Couldn't reach IPC socket, playback progress was not synced to Plex server.\n")
   else
-    local ok, err = self:mpv_socket_handle(item)
+    -- request tracking for playlist's sake
+    self.mpv_socket:write('{ "command": ["observe_property", 1, "playlist-pos-1"] }\n')
+    -- issue initial playback position check
+    self.mpv_socket:write(PMCLI.IPC.GET_PLAYBACK_TIME)
+    local ok, err = self:mpv_socket_handle(playlist)
     if not ok then
       err = require("cqueues.errno").strerror(err)
       io.stderr:write("[!] IPC socket error: " .. err ..". Playback sync halted.\n" )
@@ -433,7 +478,7 @@ function PMCLI:get_menu_items(reply, parent_key)
           duration = item.duration,
           view_offset = item.viewOffset,
           rating_key = item.ratingKey,
-          part_keys = { utils.join_keys(parent_key, item.Media[1].Part[1].key) },
+          part_key = utils.join_keys(parent_key, item.Media[1].Part[1].key),
           tag = "T"
         }
       elseif item.type == "episode" or item.type == "movie" then
@@ -467,22 +512,36 @@ function PMCLI:get_menu_items(reply, parent_key)
 end
 
 
-function PMCLI:open_item(item)
-  if item.tag == "D" or item.tag == "L" then
-    self:open_menu(item)
-  elseif item.tag == "T" then
-    self:play_audio(item)
-  elseif item.tag == "M" or item.tag == "E" then
-    self:play_video(item)
-  elseif item.tag == "?" then
-    self:local_search(item)
+function PMCLI:playlist_enqueue(item)
+  if not self.playlist then
+    self.playlist = { item }
+  else
+    self.playlist[#self.playlist + 1] = item
   end
 end
 
 
--- PLACEHOLDER!!
-function PMCLI:play_audio(item)
-  self:play_media(item)
+function PMCLI:playlist_try_play_all()
+  if self.playlist then
+    self:play_media(self.playlist)
+    self.playlist = nil
+  end
+end
+
+
+function PMCLI:open_item(item)
+  if item.tag == "D" or item.tag == "L" then
+    self:playlist_try_play_all()
+    self:open_menu(item)
+  elseif item.tag == "T" then
+    self:playlist_enqueue(item)
+  elseif item.tag == "M" or item.tag == "E" then
+    self:playlist_try_play_all()
+    self:play_video(item)
+  elseif item.tag == "?" then
+    self:playlist_try_play_all()
+    self:local_search(item)
+  end
 end
 
 
@@ -511,12 +570,16 @@ function PMCLI:play_video(item)
     end
     -- user choice
     io.stdout:write("Please select one for playback: ")
-    repeat
+    choice = tonumber(utils.read())
+    while not choice or choice < 1 or choice > #(metadata.Media) do
+      io.stderr:write("[!!] Invalid choice.\n")
       choice = tonumber(utils.read())
-      if not choice or choice < 1 or choice > #(metadata.Media) then
-        io.stderr:write("[!!] Invalid choice.\n")
-      end
-    until choice and choice > 0  and choice <= #(metadata.Media)
+    end
+  end
+  
+  -- notify user if there are many parts
+  if #metadata.Media[choice].Part > 1 then
+    io.stdout:write("\n-- " .. item.title .. " is made up of " .. #metadata.Media[choice].Part .. " files which will be played consecutively --\n\n")
   end
   
   -- all parts, each with their respective subtitles, are sent for playback
@@ -526,7 +589,7 @@ function PMCLI:play_video(item)
       view_offset = metadata.viewOffset,
       duration = metadata.duration,
       rating_key = metadata.ratingKey,
-      part_keys = { p.key },
+      part_key = p.key,
       subs = { }
     }
     for _,s in ipairs(p.Stream) do
@@ -535,7 +598,7 @@ function PMCLI:play_video(item)
         table.insert(stream_item.subs, self.options.base_addr .. s.key)
       end
     end
-    self:play_media(stream_item)
+    self:play_media({ stream_item })
   end
 end
 
@@ -569,9 +632,11 @@ function PMCLI:open_menu(parent_item)
           self:open_item(items[c])
         end
     end
+    -- if the last item was audio we must still play it
+    self:playlist_try_play_all()
   end
 end
--- ===============================
+-- =============================
 
 
 function PMCLI:run()

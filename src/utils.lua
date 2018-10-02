@@ -62,12 +62,15 @@ end
 
 -- ========== MISCELLANEOUS ==========
 -- save stty state as we found it
-utils.stty_save = (function()
+function utils.save_stty()
   f = assert(io.popen("stty --save", "r"))
   s = assert(f:read())
   assert(f:close())
   return s
-end)()
+end
+
+
+utils.stty_save = utils.save_stty()
 
 
 function utils.generate_random_id()
