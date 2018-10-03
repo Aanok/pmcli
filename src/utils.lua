@@ -125,9 +125,11 @@ end
 
 function utils.confirm_yn(msg, default)
   io.stdout:write(msg .. " [y/n]\n")
-  repeat
+  local yn = utils.read()
+  while yn ~= "y" and yn ~= "n" do
+    io.stderr:write("[!!] Please enter either 'y' or 'n'.\n")
     yn = utils.read()
-  until yn == "y" or yn == "n"
+  end
   return yn == "y"
 end
 

@@ -4,7 +4,7 @@ local pmcli = {}
 -- class
 -- we init some "static" values
 local PMCLI = {
-  VERSION = "0.1",
+  VERSION = "0.1.1",
   HELP_TEXT = [[Usage:
   pmcli [ --login ] [ --config configuration_file ]
   pmcli [ --help ] ]],
@@ -103,21 +103,35 @@ function pmcli.new(args)
   
   -- setup options from config file
   -- or, alternatively, ask user and login
+  local must_save_config = false
   local error_message, error_code
   self.options, error_message, error_code = utils.get_config(parsed_args.config_filename)
   if not self.options and error_code == 2 then
     -- config file not found
     -- if --login was passed, skip confirmation prompt
     self.options = self:first_time_config(parsed_args.login, parsed_args.config_filename)
+    must_save_config = true
   elseif not self.options and error_code ~= 2 then
     -- real error
     self:quit("Error opening configuration file:\n" .. error_message)
-  elseif self.options and parsed_args.login then
+  end
+  -- self.options is valid from here onwards
+  
+  if not self.options.pmcli_version or self.options.pmcli_version ~= PMCLI.VERSION then
+    io.stdout:write("Check the changelog at https://github.com/Aanok/pmcli/blob/master/Changelog.md\n")
+    self.options.pmcli_version = PMCLI.VERSION
+    must_save_config = true
+  end
+  
+  if parsed_args.login then
     -- config file found but user wants to redo login
     io.stdout:write("Attempting new login to obtain a new token.\n")
     self.options.plex_token, self.options.unique_identifier = self:login()
+    must_save_config = true
+  end
+  
+  if must_save_config then
     io.stdout:write("Committing configuration to disk...\n")
-    
     local ok, error_message, error_code = utils.write_config(self.options, parsed_args.config_filename)
     if not ok and error_code == -2 then
       io.stderr:write(error_message .. "\n")
@@ -187,7 +201,7 @@ end
 
 function PMCLI:login()
   local plex_token
-  local unique_identifier = "pmcli-" .. PMCLI.VERSION .. "-" .. utils.generate_random_id()
+  local unique_identifier = "pmcli-" .. utils.generate_random_id()
   repeat 
     io.stdout:write("\nPlease enter your Plex account name or email.\n")
     local login = utils.read()
@@ -230,14 +244,6 @@ function PMCLI:first_time_config(skip_prompt, user_filename)
   options.plex_token, options.unique_identifier = self:login()
   
   options.require_hostname_validation = not utils.confirm_yn("\nDo you need PMCLI to ignore hostname validation (must e.g. if using builtin SSL certificate)?")
-  
-  io.stdout:write("\nCommitting configuration to disk...\n")
-  local ok, error_message, error_code = utils.write_config(options, user_filename)
-  if not ok and error_code == -2 then
-    io.stderr:write(error_message .. "\n")
-  elseif not ok and error_code ~= -2 then
-    self:quit("Error writing configuration file:\n" .. error_message)
-  end
   
   return options
 end
