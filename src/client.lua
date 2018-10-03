@@ -306,15 +306,16 @@ function PMCLI:sync_progress(item, msecs)
   -- a metadata update is in progress or such
     if not item.last_sync or math.abs(item.last_sync - msecs) > 10000 then
     -- there is actual progress to update
-      if msecs > item.duration * 0.95 then -- close enough to end, scrobble
+      local total_msecs = item.offset_to_part + msecs
+      if total_msecs > item.duration * 0.95 then -- close enough to end, scrobble
         local ok, error_msg = self:plex_request("/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library")
         if not ok then
           io.stderr:write("[!] " .. error_msg .. "\n")
         else
           item.last_sync = nil
         end
-      elseif msecs > item.duration * 0.05 then -- far enough from start, update viewOffset
-        local ok, error_msg = self:plex_request("/:/progress?key=" .. item.rating_key .. "&time=" .. msecs .. "&identifier=com.plexapp.plugins.library")
+      elseif total_msecs > item.duration * 0.05 then -- far enough from start, update viewOffset
+        local ok, error_msg = self:plex_request("/:/progress?key=" .. item.rating_key .. "&time=" .. total_msecs .. "&identifier=com.plexapp.plugins.library")
         if not ok then
           io.stderr:write("[!] " .. error_msg .. "\n")
         else
@@ -340,7 +341,6 @@ function PMCLI:mpv_socket_handle(playlist)
       self.mpv_socket:write(PMCLI.IPC.GET_PLAYBACK_TIME)
     elseif msg then
       local decoded = json.decode(msg)
-      --print(msg)
       if decoded.event == "property-change" and decoded.id == 1 then
         -- playlist-pos-1
         pos = decoded.data
@@ -380,13 +380,13 @@ function PMCLI:mpv_socket_handle(playlist)
 end
 
 
-function PMCLI:play_media(playlist)
-  local mpv_args = "--input-ipc-server=" .. self.mpv_socket_name
-  
+function PMCLI:play_media(playlist, force_resume)
+  local mpv_args = "--input-ipc-server=" .. self.mpv_socket_name  
   mpv_args = mpv_args .. " --http-header-fields='x-plex-token: " .. self.options.plex_token .. "'"
+  mpv_args = mpv_args .. " --title='" .. playlist[1].title .. "'"
   
   -- bookmark
-  if playlist[1].view_offset and utils.confirm_yn(playlist[1].title .. " is set as partially viewed. Would you like to resume at " .. utils.msecs_to_time(playlist[1].view_offset) .. "?") then
+  if playlist[1].view_offset and (force_resume or utils.confirm_yn(playlist[1].title .. " is set as partially viewed. Would you like to resume at " .. utils.msecs_to_time(playlist[1].view_offset) .. "?")) then
     mpv_args = mpv_args .. " --start=" .. utils.msecs_to_time(playlist[1].view_offset)
   end
   
@@ -429,8 +429,6 @@ function PMCLI:play_media(playlist)
   else
     -- request tracking for playlist's sake
     self.mpv_socket:write('{ "command": ["observe_property", 1, "playlist-pos-1"] }\n')
-    -- issue initial playback position check
-    self.mpv_socket:write(PMCLI.IPC.GET_PLAYBACK_TIME)
     local ok, err = self:mpv_socket_handle(playlist)
     if not ok then
       err = require("cqueues.errno").strerror(err)
@@ -477,6 +475,7 @@ function PMCLI:get_menu_items(reply, parent_key)
           title = pmcli.compute_title(item, mc),
           duration = item.duration,
           view_offset = item.viewOffset,
+          offset_to_part = 0,
           rating_key = item.ratingKey,
           part_key = utils.join_keys(parent_key, item.Media[1].Part[1].key),
           tag = "T"
@@ -577,28 +576,50 @@ function PMCLI:play_video(item)
     end
   end
   
+  -- pretty bad to pollute the scope with this many variables but w/e
+  local offset_to_part = 0
+  local first_part = 1
+  local last_part = #metadata.Media[choice].Part
+  local force_resume = false
+  if metadata.viewOffset and utils.confirm_yn(metadata.title .. " is set as partially viewed. Would you like to resume at " .. utils.msecs_to_time(metadata.viewOffset) .. "?") then
+    force_resume = true
+    -- NB we assume that if the viewOffset wasn't found up to the second-to-last part,
+    -- then it surely is in the last part
+    while first_part < last_part and offset_to_part + metadata.Media[choice].Part[first_part].duration < metadata.viewOffset do
+      offset_to_part = offset_to_part + metadata.Media[choice].Part[first_part].duration
+      first_part = first_part + 1
+    end
+    metadata.Media[choice].Part[first_part].view_offset = metadata.viewOffset - offset_to_part
+  end
+  
   -- notify user if there are many parts
-  if #metadata.Media[choice].Part > 1 then
-    io.stdout:write("\n-- " .. item.title .. " is made up of " .. #metadata.Media[choice].Part .. " files which will be played consecutively --\n\n")
+  if last_part > first_part then
+    io.stdout:write("\n-- Playback will consist of " .. last_part - first_part + 1 .. " files which will be played consecutively --\n\n")
   end
   
   -- all parts, each with their respective subtitles, are sent for playback
-  for _,p in ipairs(metadata.Media[choice].Part) do
+  for i = first_part, last_part do
     local stream_item = {
       title = item.title,
-      view_offset = metadata.viewOffset,
       duration = metadata.duration,
       rating_key = metadata.ratingKey,
-      part_key = p.key,
+      offset_to_part = offset_to_part,
+      part_key = metadata.Media[choice].Part[i].key,
+      view_offset = metadata.Media[choice].Part[i].view_offset,
       subs = { }
     }
-    for _,s in ipairs(p.Stream) do
+    for _,s in ipairs(metadata.Media[choice].Part[i].Stream) do
       if s.streamType == 3 and s.key then
         -- it's an external subtitle
-        table.insert(stream_item.subs, self.options.base_addr .. s.key)
+        stream_item.subs[#stream_item.subs + 1] = self.options.base_addr .. s.key
       end
     end
-    self:play_media({ stream_item })
+    
+    -- as we have already prompted for resume, on the first file we will want
+    -- to skip prompting again, if user said yes
+    self:play_media({ stream_item }, force_resume and i == first_part)
+    
+    offset_to_part = offset_to_part + metadata.Media[choice].Part[i].duration
   end
 end
 
