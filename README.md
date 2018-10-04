@@ -1,5 +1,8 @@
 # Plex Media CLIent
-**DISCLAIMER**: the client works but it is a side project and a learning experience for me. No guarantee whatsoever is offered about it. The target OS is Linux only.
+
+[![asciicast](https://asciinema.org/a/jCId8APky980YemJdfdBDJZGI.png)](https://asciinema.org/a/jCId8APky980YemJdfdBDJZGI)
+
+**Disclaimer**: the client is a side project and learning experience for me. No guarantee whatsoever is offered about it. The target OS is Linux only.
 
 ## Dependencies
 * Lua >= 5.1 (LuaJIT too, although there is no reason to use it)
