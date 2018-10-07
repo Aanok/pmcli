@@ -1,3 +1,9 @@
+# 0.1.2
+2018/10/7
+
+- Fixed a bug with lack of escaping in mpv --title argument
+
+
 # 0.1.1
 2018/10/3
 

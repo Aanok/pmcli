@@ -73,6 +73,11 @@ end
 utils.stty_save = utils.save_stty()
 
 
+function utils.escape_quote(str)
+  return string.gsub(str, "'", "'\\''")
+end
+
+
 function utils.generate_random_id()
   -- string of 32 random digits
   math.randomseed(os.time())
