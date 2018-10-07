@@ -9,7 +9,7 @@ description = {
    license = "MIT"
 }
 dependencies = {
-   "lua >= 5.1",
+   "lua = 5.2",
    "http",
    "dkjson",
    "html-entities",
@@ -19,11 +19,12 @@ build = {
    type = "builtin",
    modules = {
       ["pmcli.client"] = "src/client.lua",
-      ["pmcli.utils"] = "src/utils.lua"
+      ["pmcli.utils"] = "src/utils.lua",
+      ["pmcli.mpv_script"] = "src/mpv_script.lua"
    },
    install = {
     bin = {
-      ["pmcli"] = "src/pmcli.sh"
+      ["pmcli-mpv"] = "src/pmcli.sh"
     }
    }
 }
