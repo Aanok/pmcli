@@ -4,7 +4,7 @@ local pmcli = {}
 -- class
 -- we init some "static" values
 local PMCLI = {
-  VERSION = "0.1.1",
+  VERSION = "0.1.2",
   HELP_TEXT = [[Usage:
   pmcli [ --login ] [ --config configuration_file ]
   pmcli [ --help ] ]],
@@ -389,7 +389,7 @@ end
 function PMCLI:play_media(playlist, force_resume)
   local mpv_args = "--input-ipc-server=" .. self.mpv_socket_name  
   mpv_args = mpv_args .. " --http-header-fields='x-plex-token: " .. self.options.plex_token .. "'"
-  mpv_args = mpv_args .. " --title='" .. playlist[1].title .. "'"
+  mpv_args = mpv_args .. " --title='" .. utils.escape_quote(playlist[1].title) .. "'"
   
   -- bookmark
   if playlist[1].view_offset and (force_resume or utils.confirm_yn(playlist[1].title .. " is set as partially viewed. Would you like to resume at " .. utils.msecs_to_time(playlist[1].view_offset) .. "?")) then
@@ -419,6 +419,7 @@ function PMCLI:play_media(playlist, force_resume)
     -- note that the main thread does not receive signals anymore as well
     local signal = require("cqueues.signal")
     signal.unblock(signal.SIGINT)
+    print(mpv_args)
     os.execute("mpv " .. mpv_args)
   end, mpv_args)
   
