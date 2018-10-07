@@ -419,7 +419,6 @@ function PMCLI:play_media(playlist, force_resume)
     -- note that the main thread does not receive signals anymore as well
     local signal = require("cqueues.signal")
     signal.unblock(signal.SIGINT)
-    print(mpv_args)
     os.execute("mpv " .. mpv_args)
   end, mpv_args)
   
