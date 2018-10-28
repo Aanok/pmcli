@@ -257,7 +257,7 @@ end
 
 
 function utils.write_config(options, user_filename)
-  local config_filename, error_message = user_filename or utils.get_config_absolute_filename()
+  local config_filename, error_message = user_filename ~= "" and user_filename or utils.get_config_absolute_filename()
   if not config_filename then
     -- file not found of sorts
     return nil, error_message, -1
@@ -289,7 +289,7 @@ function utils.get_config(user_filename)
   }
     
   -- open file
-  local config_filename, error_message = user_filename or utils.get_config_absolute_filename()
+  local config_filename, error_message = user_filename ~= "" and user_filename or utils.get_config_absolute_filename()
   if not config_filename then
     return nil, error_message
   end

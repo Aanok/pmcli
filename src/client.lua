@@ -4,10 +4,7 @@ local pmcli = {}
 -- class
 -- we init some "static" values
 local PMCLI = {
-  VERSION = "0.1.1",
-  HELP_TEXT = [[Usage:
-  pmcli [ --login ] [ --config configuration_file ]
-  pmcli [ --help ] ]],
+  VERSION = "0.2",
   AMBIGUOUS_CONTEXTS = {
     ["On Deck"] = true,
     ["Recently Added"] = true,
@@ -92,24 +89,21 @@ end
 
 
 -- ========== SETUP ==========
--- constructor
+-- constructor; NB args have already been validated in Bash
 function pmcli.new(args)
   io.stdout:write("Plex Media CLIent v" ..  PMCLI.VERSION .. "\n")
   local self = {}
   setmetatable(self, { __index = PMCLI })
   
-  -- first, read CLI arguments
-  local parsed_args = self:parse_args(args)
-  
   -- setup options from config file
   -- or, alternatively, ask user and login
   local must_save_config = false
   local error_message, error_code
-  self.options, error_message, error_code = utils.get_config(parsed_args.config_filename)
+  self.options, error_message, error_code = utils.get_config(args.config)
   if not self.options and error_code == 2 then
     -- config file not found
     -- if --login was passed, skip confirmation prompt
-    self.options = self:first_time_config(parsed_args.login, parsed_args.config_filename)
+    self.options = self:first_time_config(args.login, args.config)
     must_save_config = true
   elseif not self.options and error_code ~= 2 then
     -- real error
@@ -123,7 +117,7 @@ function pmcli.new(args)
     must_save_config = true
   end
   
-  if parsed_args.login then
+  if args.login then
     -- config file found but user wants to redo login
     io.stdout:write("Attempting new login to obtain a new token.\n")
     self.options.plex_token, self.options.unique_identifier = self:login()
@@ -132,7 +126,7 @@ function pmcli.new(args)
   
   if must_save_config then
     io.stdout:write("Committing configuration to disk...\n")
-    local ok, error_message, error_code = utils.write_config(self.options, parsed_args.config_filename)
+    local ok, error_message, error_code = utils.write_config(self.options, args.config)
     if not ok and error_code == -2 then
       io.stderr:write(error_message .. "\n")
     elseif not ok and error_code ~= -2 then
@@ -160,32 +154,6 @@ end
 
 function PMCLI:connect_mpv_socket()
   self.mpv_socket = socket.connect({ path = self.mpv_socket_name })
-end
-
-
--- command line arguments
-function PMCLI:parse_args(args)
-  local parsed_args = {}
-  local i = 1
-  while i <= #args do
-    if args[i] == "--login" then
-      parsed_args.login = true
-    elseif args[i] == "--help" then
-      io.stdout:write(PMCLI.HELP_TEXT .. "\n")
-      self:quit()
-    elseif args[i] == "--config" then
-      -- next argument should be parameter
-      if not args[i + 1] then
-        self:quit("--config requires a filename.")
-      end
-      parsed_args.config_filename = args[i + 1]
-      i = i + 1
-    else
-      self:quit("Unrecognized command line option: " .. args[i] .. "\n" .. PMCLI.HELP_TEXT)
-    end
-    i = i + 1
-  end
-  return parsed_args
 end
 
 

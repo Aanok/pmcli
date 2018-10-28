@@ -9,39 +9,58 @@ MPV_SCRIPT="$(luarocks-5.2 show pmcli | grep mpv_script | sed -n -e 's/.*(\([^)]
 
 # TODO arguments might need to include an stty --save call if i can't figure out a way to sanitize terminal IO from within mpv
 
+
 # ARGUMENT PARSING
-# rationale: just pass everything, let the script sort it out
 # encoding:
-#	option=true if present and doesn't need argument
+#	option=yes if standalone
 #	option=argument if present with argument
-#	option=false if present and should have arugment but does not
+
+# Conveniency function printing help/usage information
+function usage {
+	echo "Usage:"
+	echo "pmcli [ --login ] [ --config configuration_file ]"
+	echo "pmcli [ --help ]"
+}
+
+# Conveniency function to populate mpv argument list
 SCRIPT_OPTS=""
 function script_opts_enqueue {
 # N.B. No validation!!
 # but substring will kill everything up to the last dash
-	SCRIPT_OPTS="${SCRIPT_OPTS} --script-opts=pmcli-${1##*-}=${2}"
+	if [ -z "${SCRIPT_OPTS}" ]; then
+		SCRIPT_OPTS="--script-opts=pmcli-${1##*-}=${2}"
+	else
+		SCRIPT_OPTS="${SCRIPT_OPTS},pmcli-${1##*-}=${2}"
+	fi
 }
 while [[ $# -gt 0 ]]; do
 	case "${1}" in
-	--help|--login)
-	# options that don't require a following parameter
-		script_opts_enqueue "${1}" "true"
-		;;
+	--login)
+		script_opts_enqueue "${1}" "yes"
+	;;
+	--help)
+	# print message and exit
+		usage
+		exit
+	;;
 	--config)
-	# options that do require a following parameter
+	# needs following argument
 		if [ -n "${2}" ]; then
 			script_opts_enqueue "${1}" "${2}"
 			shift
 		else
-			script_opts_enqueue "${1}" "false"
+			echo "[!!!] --config requires a following file name" >&2
+			exit 1
 		fi
-		;;
+	;;
 	*)
 	# unrecognized
-		script_opts_enqueue "${1}" "false"
-		;;
+		echo "[!!!] unrecognized argument '${1}'" >&2
+		usage
+		exit 1
+	;;
 	esac
 	shift
 done
 
-echo mpv --script "${MPV_SCRIPT}" "${SCRIPT_OPTS}" --idle
+mpv --script "${MPV_SCRIPT}" "${SCRIPT_OPTS}" --idle
