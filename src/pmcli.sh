@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # TODO: in Arch PKGBUILD replace following with
-# MPV_SCRIPT="/usr/share/local/lua/5.2/pmcli/mpv_script.lua"
+# ARGS=("/usr/share/local/lua/5.2/pmcli/mpv_script.lua")
 # since it does not use luarocks
 
 # SCRIPT FILE LOCATION
@@ -63,4 +63,9 @@ while [[ $# -gt 0 ]]; do
 	shift
 done
 
-mpv --script "${MPV_SCRIPT}" "${SCRIPT_OPTS}" --idle
+# discriminate because mpv doesn't like an empty string argument: it thinks it's a file
+if [[ -n "${SCRIPT_OPTS}" ]] ; then
+	mpv --script "${MPV_SCRIPT}" "${SCRIPT_OPTS}" --idle
+else
+	mpv --script "${MPV_SCRIPT}" --idle
+fi
