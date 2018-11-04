@@ -148,6 +148,11 @@ function pmcli.new(args)
   self.mpv_socket_name = os.tmpname()
   socket.settimeout(10.0) -- new default
   
+  local quit_keys = utils.get_masked_input_conf_quit_binds()
+  for key,command in pairs(quit_keys) do
+	pcall(mp.add_forced_key_binding, key, function() mp.command(command)end )
+  end
+  
   return self
 end
 
@@ -355,6 +360,8 @@ end
 
 
 function PMCLI:play_media(playlist, force_resume)
+	mp.commandv("loadfile", self.options.base_addr .. playlist[1].part_key)
+--[[
   local mpv_args = "--input-ipc-server=" .. self.mpv_socket_name  
   mpv_args = mpv_args .. " --http-header-fields='x-plex-token: " .. self.options.plex_token .. "'"
   mpv_args = mpv_args .. " --title='" .. playlist[1].title .. "'"
@@ -413,6 +420,7 @@ function PMCLI:play_media(playlist, force_resume)
 
   -- innocuous if already joined
   mpv_thread:join()
+--]]
 end
 
 
@@ -638,6 +646,15 @@ function PMCLI:run()
   io.stdout:write("Connecting to Plex Server...\n")
   local _, errmsg = pcall(self.open_menu, self, { key = "/library/sections" })
   self:quit(errmsg)
+end
+
+
+function PMCLI:menu()
+	mp.set_property_bool("terminal", false) -- good and nice, prevents key events from being forwarded to mpv and disables raw input mode
+	io.stdout:write("Hi, I'm a menu! Have some music after the break.\n")
+	io.read()
+	mp.set_property_bool("terminal", true) -- of course we must restore it to allow user control of mpv
+	mp.commandv("loadfile", "https://192.168.1.29:32400/library/parts/266763/1498254606/file.opus")	
 end
 
 

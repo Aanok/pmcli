@@ -309,4 +309,59 @@ function utils.get_config(user_filename)
 end
 -- ==================================
 
+
+-- ========== INPUT.CONF ===========
+-- This mechanism is a terrible hack, but there is no easy alternative.
+-- We need to remap user quit requests to stop request and mpv has no interface
+-- to give you a list of keys bound to a certain command (reasonably: commands
+-- can be arbitrary sequences); the only alternatives would be to reimplement
+-- the event loop manually or embed mpv through libmpv... I'd rather not.
+function utils.get_input_conf_filename()
+-- NB: as of right now mpv only ever reads a single input.conf file
+	local dir = os.getenv("XDG_CONFIG_HOME")
+	dir = dir or os.getenv("HOME")
+	return dir and dir .. "/.config/mpv/input.conf"
+end
+
+
+function utils.parse_input_conf_line(line)
+	-- read up to comment
+	local bind = string.match(line, "^[^#]*")
+	-- (key command) pairs, either can be nil if malformed input.conf
+	return string.match(bind, '^%s*(%S+)%s+(.+)')
+end
+
+
+function utils.get_masked_input_conf_quit_binds()
+	-- setup default overwrites
+	local quit_binds = {
+		["q"] = "stop",
+		["Q"] = "write-watch-later-config; stop"
+	}
+	local input_conf_filename = utils.get_input_conf_filename()
+	if input_conf_filename then
+	-- there are nondefault binds of some sort
+		local file, error_message, error_code = io.open(input_conf_filename)
+		if not file then
+			return nil, error_message, error_code
+		end
+		for l in file:lines() do
+			local key, command = utils.parse_input_conf_line(l)
+			if key and command then
+			-- it's not a comment or otherwise malformed
+				if quit_binds[key] and not string.match(command, "quit") then
+				-- remapped, hopefully it was just the default
+					quit_binds[key] = command
+				elseif string.match(command, "quit") then
+				-- nondefault with quit
+					quit_binds[key] = string.gsub(command, "quit%-watch%-later", "write-watch-later-config; stop")
+					quit_binds[key] = string.gsub(quit_binds[key], "quit", "stop")
+				end
+			end
+		end
+	end
+	return quit_binds
+end
+-- =================================
+
 return utils

@@ -1,4 +1,4 @@
-os.execute("stty sane")
+--os.execute("stty sane")
 
 -- caveat insanity: options are TYPE-CHECKED by mpv!
 local options = {
@@ -8,4 +8,7 @@ local options = {
 	}
 require("mp.options").read_options(options, "pmcli")
 
-require("pmcli.client").new(options):run()
+-- create client, refer to it as upvalue from event handlers so we can
+-- properly invoke methods
+local client = require("pmcli.client").new(options)
+mp.register_event("idle", function(event) client:menu(event) end)
