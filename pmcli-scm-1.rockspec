@@ -12,7 +12,6 @@ dependencies = {
    "lua = 5.2",
    "http",
    "dkjson",
-   "html-entities",
    "lpeg"
 }
 build = {
