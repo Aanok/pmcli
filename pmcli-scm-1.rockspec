@@ -17,7 +17,6 @@ dependencies = {
 build = {
    type = "builtin",
    modules = {
-      ["pmcli.client"] = "src/client.lua",
       ["pmcli.utils"] = "src/utils.lua",
       ["pmcli.mpv_script"] = "src/mpv_script.lua"
    },
