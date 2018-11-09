@@ -205,6 +205,7 @@ end
 
 
 function pmcli.play_media(playlist, force_resume)
+	mp.set_property_bool("terminal", true)
 	mp.commandv("loadfile", pmcli.options.base_addr .. playlist[1].part_key)
 --[[
 	local mpv_args = "--input-ipc-server=" .. pmcli.mpv_socket_name  
@@ -349,7 +350,7 @@ end
 
 function pmcli.playlist_try_play_all()
 	if pmcli.playlist then
-		pmcli:play_media(pmcli.playlist)
+		pmcli.play_media(pmcli.playlist)
 		pmcli.playlist = nil
 	end
 end
@@ -373,7 +374,7 @@ end
 
 function pmcli.play_video(item)
 	-- fetch metadata
-	local body = assert(pmcli:plex_request(item.key))
+	local body = assert(pmcli.plex_request(item.key))
 	local reply = assert(json.decode(body))
 	body = nil
 	local metadata = assert(reply.MediaContainer and reply.MediaContainer.Metadata and reply.MediaContainer.Metadata[1],
@@ -469,7 +470,7 @@ function pmcli.open_menu(parent_item)
 		utils.print_menu(items)
 		for _,c in ipairs(utils.read_commands()) do
 			if c == "q" then
-				pmcli:quit()
+				pmcli.quit()
 			elseif c == "*" then
 				for _,item in ipairs(items) do
 					pmcli.open_item(item)
@@ -496,10 +497,7 @@ end
 
 function pmcli.menu()
 	mp.set_property_bool("terminal", false) -- good and nice, prevents key events from being forwarded to mpv and disables raw input mode
-	io.stdout:write("Hi, I'm a menu! Have some music after the break.\n")
-	io.read()
-	mp.set_property_bool("terminal", true) -- of course we must restore it to allow user control of mpv
-	mp.commandv("loadfile", "https://192.168.1.29:32400/library/parts/266763/1498254606/file.opus")	
+	pmcli.open_menu(pmcli.command_queue:dequeue())
 end
 
 
@@ -587,7 +585,7 @@ do
 		login = false
 		}
 	require("mp.options").read_options(args, "pmcli")
-	io.stdout:write("Plex Media CLIent v" ..  VERSION .. "\n")
+	io.stdout:write("Plex Media CLIent v" ..  pmcli.VERSION .. "\n")
 	
 	-- setup options from config file
 	-- or, alternatively, ask user and login
@@ -645,6 +643,11 @@ do
 			io.stderr:write("[!] Could not mask a quit keybind: " .. errmsg .. "\n")
 		end
 	end
+	
+	-- data structures for event loop navigation and user interface
+	pmcli.directory_stack = utils.STACK.new()
+	pmcli.command_queue = utils.QUEUE.new()
+	pmcli.command_queue:enqueue({ key = "/library/sections" })
 	
 	-- mpv event handlers
 	mp.register_event("idle", pmcli.menu)

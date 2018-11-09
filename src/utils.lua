@@ -312,7 +312,7 @@ end
 
 -- ========== INPUT.CONF ===========
 -- This mechanism is a terrible hack, but there is no easy alternative.
--- We need to remap user quit requests to stop request and mpv has no interface
+-- We need to remap user quit commands to stop commands and mpv has no interface
 -- to give you a list of keys bound to a certain command (reasonably: commands
 -- can be arbitrary sequences); the only alternatives would be to reimplement
 -- the event loop manually or embed mpv through libmpv... I'd rather not.
@@ -363,5 +363,85 @@ function utils.get_masked_input_conf_quit_binds()
 	return quit_binds
 end
 -- =================================
+
+
+
+-- ========== STACK ==========
+utils.STACK = {}
+
+
+function utils.STACK.new()
+	local self = {}
+	setmetatable(self, { __index = utils.STACK })
+	self.m_stack = {}
+	return self
+end
+
+
+-- TODO: add a counter of removals done since last push
+-- when they're too many, do a bogus assignment to allow garbage collection
+function utils.STACK:pop(idx)
+	local idx = idx and #self.m_stack + idx or #self.m_stack
+	local retval = self.m_stack[idx]
+	table.remove(self.m_stack, idx)
+	return retval
+end
+
+
+function utils.STACK:push(o)
+	assert(o ~= nil)
+	self.m_stack[#self.m_stack +1] = o
+end
+-- ===========================
+
+
+
+-- ========== QUEUE ==========
+utils.QUEUE = {}
+
+
+function utils.QUEUE.new()
+	local self = {}
+	setmetatable(self, { __index = utils.QUEUE })
+	self.m_queue = {}
+	self.m_first = 1
+	self.m_last = 0
+	return self
+end
+
+
+function utils.QUEUE:enqueue(o)
+	assert(o ~= nil)
+	self.m_last = self.m_last + 1
+	self.m_queue[self.m_last] = o
+end
+
+
+function utils.QUEUE:dequeue()
+	if self.m_first <= self.m_last then
+		local retval = self.m_queue[self.m_first]
+		self.m_queue[self.m_first] = nil
+		self.m_first = self.m_first +1
+		return retval
+	else
+		return nil
+	end
+end
+
+
+-- TODO: smartly shift from the closest end
+function utils.QUEUE:remove(idx)
+	idx = idx or 0
+	if idx <= 0 then
+		idx = self.m_last - idx
+	end
+	assert(self.m_first <= idx and idx <= self.m_last, "queue removal out of bounds")
+	for i = idx,self.m_last do
+		self.m_queue[i] = self.m_queue[i +1]
+	end
+	self.m_last = self.m_last - 1
+end
+-- ===========================
+
 
 return utils
