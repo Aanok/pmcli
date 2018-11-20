@@ -111,19 +111,7 @@ end
 -- =============================
 
 
--- ========== MEMBERS ==========
-function pmcli.quit(error_message)
-	if pmcli.mpv_socket_name then os.remove(pmcli.mpv_socket_name) end
-	os.execute("stty " .. utils.stty_save) -- in case of fatal errors while mpv is running
-	if error_message then
-		io.stderr:write("[!!!] " .. error_message ..  "\n")
-		os.exit(1)
-	else
-		os.exit(0)
-	end
-end
-
-
+-- ========== PLAYBACK ==========
 function pmcli.sync_progress(item, msecs)
 	if item.duration and item.rating_key then
 	-- rating_key should always be there tbh, but duration might actually be missing if
@@ -205,7 +193,9 @@ end
 
 
 function pmcli.play_media(playlist, force_resume)
+	pmcli.navigating = false
 	mp.set_property_bool("terminal", true)
+	io.stdout:write("PLAYLIST: " .. require("mp.utils").to_string(playlist) .. "\n")
 	mp.commandv("loadfile", pmcli.options.base_addr .. playlist[1].part_key)
 --[[
 	local mpv_args = "--input-ipc-server=" .. pmcli.mpv_socket_name  
@@ -267,108 +257,6 @@ function pmcli.play_media(playlist, force_resume)
 	-- innocuous if already joined
 	mpv_thread:join()
 --]]
-end
-
-
-function pmcli.get_menu_items(reply, parent_key)
-	local mc = reply.MediaContainer
-	if not mc or not mc.title1 then
-		return nil, "Unexpected reply to API request " .. pmcli.options.base_addr .. parent_key .. ":\n" .. utils.tostring(reply, true)
-	end
-	
-	local items = {}
-	
-	-- libraries and relevant views (All, By Album etc.)
-	if mc.Directory then
-		for i = 1,#mc.Directory do
-			local item = mc.Directory[i]
-			items[#items + 1] = {
-				title = pmcli.compute_title(item, mc),
-				key = utils.join_keys(parent_key, item.key),
-			}
-			if item.search then
-				items[#items].tag = "?"
-			else
-				items[#items].tag = "L"
-			end
-		end
-	end
-	-- actual items
-	if mc.Metadata then
-		for i = 1,#mc.Metadata do
-			local item = mc.Metadata[i]
-			if item.type == "track" then
-			-- audio: ready for streaming
-				items[#items + 1] = {
-					title = pmcli.compute_title(item, mc),
-					duration = item.duration,
-					view_offset = item.viewOffset,
-					offset_to_part = 0,
-					rating_key = item.ratingKey,
-					part_key = utils.join_keys(parent_key, item.Media[1].Part[1].key),
-					tag = "T"
-				}
-			elseif item.type == "episode" or item.type == "movie" then
-			-- video: will require fetching metadata before streaming
-				items[#items + 1] = {
-					title = pmcli.compute_title(item, mc),
-					key = item.key,
-					tag = item.type:sub(1,1):upper() -- E, M
-				}
-			else
-			-- some kind of directory; NB this includes when type is nil which, afaik, is only for folders in "By Folder" view
-				items[#items + 1] = {
-					title = pmcli.compute_title(item, mc),
-					key = item.key,
-					tag = "D"
-				}
-			end
-		end
-	end
-
-	-- section title
-	if mc.title2 then
-		items.title = html_entities.decode(mc.title1) ..  " - " .. html_entities.decode(mc.title2)
-	else
-		items.title = html_entities.decode(mc.title1)
-	end
-	
-	-- will determine if "0: .." or "0: quit"
-	items.is_root = mc.viewGroup == nil
-	return items
-end
-
-
-function pmcli.playlist_enqueue(item)
-	if not pmcli.playlist then
-		pmcli.playlist = { item }
-	else
-		pmcli.playlist[#pmcli.playlist + 1] = item
-	end
-end
-
-
-function pmcli.playlist_try_play_all()
-	if pmcli.playlist then
-		pmcli.play_media(pmcli.playlist)
-		pmcli.playlist = nil
-	end
-end
-
-
-function pmcli.open_item(item)
-	if item.tag == "D" or item.tag == "L" then
-		pmcli.playlist_try_play_all()
-		pmcli.open_menu(item)
-	elseif item.tag == "T" then
-		pmcli.playlist_enqueue(item)
-	elseif item.tag == "M" or item.tag == "E" then
-		pmcli.playlist_try_play_all()
-		pmcli.play_video(item)
-	elseif item.tag == "?" then
-		pmcli.playlist_try_play_all()
-		pmcli.local_search(item)
-	end
 end
 
 
@@ -450,56 +338,191 @@ function pmcli.play_video(item)
 		offset_to_part = offset_to_part + metadata.Media[choice].Part[i].duration
 	end
 end
+-- ==============================
+
+
+-- ========== NAVIGATION ==========
+function pmcli.get_menu_items(reply, parent_key)
+	local mc = reply.MediaContainer
+	if not mc or not mc.title1 then
+		return nil, "Unexpected reply to API request " .. pmcli.options.base_addr .. parent_key .. ":\n" .. utils.tostring(reply, true)
+	end
+	
+	local items = {}
+	
+	-- libraries and relevant views (All, By Album etc.)
+	if mc.Directory then
+		for i = 1,#mc.Directory do
+			local item = mc.Directory[i]
+			items[#items + 1] = {
+				title = pmcli.compute_title(item, mc),
+				key = utils.join_keys(parent_key, item.key),
+			}
+			if item.search then
+				items[#items].tag = "?"
+			else
+				items[#items].tag = "L"
+			end
+		end
+	end
+	-- actual items
+	if mc.Metadata then
+		for i = 1,#mc.Metadata do
+			local item = mc.Metadata[i]
+			if item.type == "track" then
+			-- audio: ready for streaming
+				items[#items + 1] = {
+					title = pmcli.compute_title(item, mc),
+					duration = item.duration,
+					view_offset = item.viewOffset,
+					offset_to_part = 0,
+					rating_key = item.ratingKey,
+					part_key = utils.join_keys(parent_key, item.Media[1].Part[1].key),
+					tag = "T"
+				}
+			elseif item.type == "episode" or item.type == "movie" then
+			-- video: will require fetching metadata before streaming
+				items[#items + 1] = {
+					title = pmcli.compute_title(item, mc),
+					key = item.key,
+					tag = item.type:sub(1,1):upper() -- E, M
+				}
+			else
+			-- some kind of directory; NB this includes when type is nil which, afaik, is only for folders in "By Folder" view
+				items[#items + 1] = {
+					title = pmcli.compute_title(item, mc),
+					key = item.key,
+					tag = "D"
+				}
+			end
+		end
+	end
+
+	-- section title
+	if mc.title2 then
+		items.title = html_entities.decode(mc.title1) ..  " - " .. html_entities.decode(mc.title2)
+	else
+		items.title = html_entities.decode(mc.title1)
+	end
+	
+	-- will determine if "0: .." or "0: quit"
+	items.is_root = mc.viewGroup == nil
+	return items
+end
 
 
 function pmcli.local_search(search_item)
 	io.stdout:write("Query? > ");
 	local query = "&query=" .. http_encode(io.read())
 	search_item.key = search_item.key .. query
+	-- consider the search a directory: register it
+	pmcli.directory_stack:push(search_item)
 	pmcli.open_menu(search_item)
 end
 
 
-function pmcli.open_menu(parent_item)
-	while true do
-		local body = assert(pmcli.plex_request(parent_item.key))
-		local reply = assert(json.decode(body), "Malformed JSON reply to request " .. pmcli.options.base_addr .. parent_item.key ..":\n" .. body)
-		body = nil
-		local items = assert(pmcli.get_menu_items(reply, parent_item.key))
-		reply = nil
-		utils.print_menu(items)
-		for _,c in ipairs(utils.read_commands()) do
-			if c == "q" then
-				pmcli.quit()
-			elseif c == "*" then
-				for _,item in ipairs(items) do
-					pmcli.open_item(item)
-				end
-			elseif c == 0 then
-				return
-			elseif c > 0 and c <= #items then
-				pmcli.open_item(items[c])
-			end
+-- used to dispatch commands about a specific menu item
+-- bunches up consecutive audio requests into a single playlist command
+-- enqueues the playlist when necessary (i.e. meeting a non-audio command)
+function pmcli.dispatch_item_command(item)
+	if pmcli.pending_audio then
+		if item.tag == "T" then
+			pmcli.pending_audio[#pmcli.pending_audio +1] = item
+		else
+			pmcli.command_queue:enqueue(pmcli.pending_audio)
+			pmcli.pending_audio = nil
+			pmcli.command_queue:enqueue(item)
 		end
-		-- if the last item was audio we must still play it
-		pmcli.playlist_try_play_all()
+	else
+		if item.tag == "T" then
+			pmcli.pending_audio = { tag = "playlist", item }
+		else
+			pmcli.command_queue:enqueue(item)
+		end
 	end
 end
--- =============================
 
-
-function pmcli.run()
-	io.stdout:write("Connecting to Plex Server...\n")
-	local _, errmsg = pcall(pmcli.open_menu, { key = "/library/sections" })
-	pmcli.quit(errmsg)
+-- enqueues pending audio playlist command, if any
+function pmcli.try_dispatch_pending_audio()
+	if pmcli.pending_audio then
+		pmcli.command_queue:enqueue(pmcli.pending_audio)
+		pmcli.pending_audio = nil
+	end
 end
 
 
-function pmcli.menu()
+function pmcli.open_menu(parent_item)
+	local body = assert(pmcli.plex_request(parent_item.key))
+	local reply = assert(json.decode(body), "Malformed JSON reply to request " .. pmcli.options.base_addr .. parent_item.key ..":\n" .. body)
+	body = nil
+	local items = assert(pmcli.get_menu_items(reply, parent_item.key))
+	reply = nil
+	utils.print_menu(items)
+	local commands = utils.read_commands()
+	for i = 1,#commands do
+		if commands[i] == "q" then
+			pmcli.quit()
+		elseif commands[i] == "*" then
+			for j = 1,#items do
+				pmcli.dispatch_item_command(items[j])
+			end
+		elseif commands[i] == 0 then
+			-- if the last item was audio we must still play it
+			pmcli.try_dispatch_pending_audio()
+			-- then leave
+			pmcli.directory_stack:pop()
+			return
+		elseif commands[i] > 0 and commands[i] <= #items then
+			pmcli.dispatch_item_command(items[commands[i]])
+		end
+	end
+	-- if the last item was audio we must still play it
+	pmcli.try_dispatch_pending_audio()
+end
+
+
+function pmcli.open_item(item)
+	if item.tag == "D" or item.tag == "L" then
+		-- register we've gone down a directory
+		pmcli.directory_stack:push(item)
+		pmcli.open_menu(item)
+	elseif item.tag == "T" or item.tag == "playlist" then
+		pmcli.play_media(item)
+	elseif item.tag == "M" or item.tag == "E" then
+		pmcli.play_video(item)
+	elseif item.tag == "?" then
+		pmcli.local_search(item)
+	end
+end
+
+
+function pmcli.quit(error_message)
+	mp.set_property_bool("terminal", false)
+--	os.execute("stty " .. utils.stty_save) -- in case of fatal errors while mpv is running
+	if error_message then
+		io.stderr:write("[!!!] " .. error_message ..  "\n")
+		os.exit(1)
+	else
+		os.exit(0)
+	end
+end
+
+
+function pmcli.navigate()
+	pmcli.navigating = true
 	mp.set_property_bool("terminal", false) -- good and nice, prevents key events from being forwarded to mpv and disables raw input mode
-	pmcli.open_menu(pmcli.command_queue:dequeue())
+	while pmcli.navigating do
+		-- evade pending commands if any, otherwise pop a directory
+		local next_item = pmcli.command_queue:dequeue() or pmcli.directory_stack:pop()
+		io.stdout:write("STACK: " .. require("mp.utils").to_string(pmcli.directory_stack.m_stack) .. "\n")
+		io.stdout:write("QUEUE: " .. require("mp.utils").to_string(pmcli.command_queue.m_queue) .. "\n")
+		local ok, errmsg = pcall(pmcli.open_item, next_item)
+		if not ok then
+			pmcli.quit(errmsg)
+		end
+	end
 end
-
+-- ================================
 
 
 -- ========== INIT ==========
@@ -647,8 +670,12 @@ do
 	-- data structures for event loop navigation and user interface
 	pmcli.directory_stack = utils.STACK.new()
 	pmcli.command_queue = utils.QUEUE.new()
-	pmcli.command_queue:enqueue({ key = "/library/sections" })
+	
+	-- register that we are in the root directory
+	pmcli.directory_stack:push({ tag = "L", key = "/library/sections" })
 	
 	-- mpv event handlers
-	mp.register_event("idle", pmcli.menu)
+	mp.register_event("idle", pmcli.navigate)
+	
+	io.stdout:write("Connecting to Plex Server...\n")
 end
