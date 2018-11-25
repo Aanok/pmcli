@@ -91,7 +91,7 @@ function pmcli.setup_headers(headers)
 end
 
 
-function pmcli.plex_request(suffix)
+function pmcli.plex_request(suffix, to_file)
 	local request = http_request.new_from_uri(pmcli.options.base_addr ..  suffix)
 	request.ctx = pmcli.ssl_context
 	pmcli.setup_headers(request.headers)
@@ -101,7 +101,7 @@ function pmcli.plex_request(suffix)
 		return nil, "Network error on API request " .. pmcli.options.base_addr .. suffix .. ":\n" .. stream
 	end
 	if headers:get(":status") == "200" then
-		return stream:get_body_as_string()
+		return to_file and stream:save_body_to_file(pmcli.stream_file_handle) or stream:get_body_as_string()
 	elseif headers:get(":status") == "401" then
 		return nil, "API request " .. pmcli.options.base_addr .. suffix .. " returned error 401: unauthorized.\nYour token may have expired, consider logging in again by passing --login."
 	else
@@ -195,8 +195,16 @@ end
 function pmcli.play_media(playlist, force_resume)
 	pmcli.navigating = false
 	mp.set_property_bool("terminal", true)
-	io.stdout:write("PLAYLIST: " .. require("mp.utils").to_string(playlist) .. "\n")
-	mp.commandv("loadfile", pmcli.options.base_addr .. playlist[1].part_key)
+	print("PLAYLIST: " .. require("mp.utils").to_string(playlist))
+	pmcli.downloader:get(pmcli.options.base_addr .. playlist[1].part_key)
+	local reply = pmcli.downloader:get_result()
+	if reply == "ok" then
+		require("cqueues").sleep(0.1)
+		mp.commandv("loadfile", pmcli.stream_file_name)
+	else
+		return nil, reply
+	end
+--	pmcli.plex_request(playlist[1].part_key, true)
 --[[
 	local mpv_args = "--input-ipc-server=" .. pmcli.mpv_socket_name  
 	mpv_args = mpv_args .. " --http-header-fields='x-plex-token: " .. pmcli.options.plex_token .. "'"
@@ -498,6 +506,8 @@ end
 
 function pmcli.quit(error_message)
 	mp.set_property_bool("terminal", false)
+	io.close(pmcli.stream_file_handle)
+	os.remove(pmcli.stream_file_name)
 --	os.execute("stty " .. utils.stty_save) -- in case of fatal errors while mpv is running
 	if error_message then
 		io.stderr:write("[!!!] " .. error_message ..  "\n")
@@ -509,13 +519,18 @@ end
 
 
 function pmcli.navigate()
+	-- reset HTTP cache file to head
+--	pmcli.downloader:get_result(0.1)
+	pmcli.stream_file_handle:seek("set")
+	-- set state to menu mode
 	pmcli.navigating = true
-	mp.set_property_bool("terminal", false) -- good and nice, prevents key events from being forwarded to mpv and disables raw input mode
+	-- prevent key events from being forwarded to mpv and disables raw input mode
+	mp.set_property_bool("terminal", false)
 	while pmcli.navigating do
 		-- evade pending commands if any, otherwise pop a directory
 		local next_item = pmcli.command_queue:dequeue() or pmcli.directory_stack:pop()
-		io.stdout:write("STACK: " .. require("mp.utils").to_string(pmcli.directory_stack.m_stack) .. "\n")
-		io.stdout:write("QUEUE: " .. require("mp.utils").to_string(pmcli.command_queue.m_queue) .. "\n")
+--		io.stdout:write("STACK: " .. require("mp.utils").to_string(pmcli.directory_stack.m_stack) .. "\n")
+--		io.stdout:write("QUEUE: " .. require("mp.utils").to_string(pmcli.command_queue.m_queue) .. "\n")
 		local ok, errmsg = pcall(pmcli.open_item, next_item)
 		if not ok then
 			pmcli.quit(errmsg)
@@ -666,6 +681,12 @@ do
 			io.stderr:write("[!] Could not mask a quit keybind: " .. errmsg .. "\n")
 		end
 	end
+	
+	-- file for streaming media HTTP requests to
+	pmcli.stream_file_name = os.tmpname()
+	pmcli.stream_file_handle = io.open(pmcli.stream_file_name, "w")
+	
+	pmcli.downloader = utils.DOWNLOADER.new(pmcli.options, pmcli.stream_file_name)
 	
 	-- data structures for event loop navigation and user interface
 	pmcli.directory_stack = utils.STACK.new()

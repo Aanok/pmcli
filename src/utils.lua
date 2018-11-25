@@ -444,4 +444,153 @@ end
 -- ===========================
 
 
+-- ========== DOWNLOAD HELPER ==========
+utils.DOWNLOADER = {}utils.DOWNLOADER = {}
+
+-- NOTA BENE: for the moment, this code is all duplicated
+-- hopefully, we'll eventually be able to use a downloader instance for all our requests
+-- especially considering that we plan to stream everything from local files
+function utils.DOWNLOADER.new(options, stream_file_name)
+	local self = {}
+	setmetatable(self, { __index = utils.DOWNLOADER })
+	
+	self.thread, self.conn = require("cqueues.thread").start(
+	function(conn, plex_token, stream_file_name, require_hostname_validation_str, verify_server_certificates_str)
+	-- this is a whole new VM so it's a complete blank slate
+	-- no globals, modules, upvalues or anything
+	-- only the arguments of the thread function
+		io.stdout:write("WOOHOO THREAD\n")
+		local http_request = require("http.request")
+		local cq = require("cqueues").new()
+		
+		io.stdout:write("FILE ", stream_file_name, "\n")
+		local stream_file_handle = io.open(stream_file_name, "w")
+		io.stdout:write("OPENED FILE\n")
+		
+		-- if we need to step around mismatched hostnames from the certificate
+		local http_tls = require("http.tls")
+		http_tls.has_hostname_validation = require_hostname_validation_str == "true"
+		local ssl_context = http_tls.new_client_context()
+		
+		-- if we need to skip certificate validation
+		if verify_server_certificates_str == "false" then
+			ssl_context:setVerify(require("openssl.ssl.context").VERIFY_NONE)
+		end
+		
+		cp:wrap(function()
+		-- read request address from socket, download to file
+			io.stdout:write("WOOHOO CQUEUE\n")
+			local target = conn:read()
+			io.stdout:write("DOWNLOADER: " .. target .. "\n")
+			local request = http_request.new_from_uri()
+			request.headers:append("x-plex-token", plex_token, true)
+			request.ctx = ssl_context
+			local headers, stream = request:go(10.0) -- 10 secs timeout
+			if not headers then
+				-- timeout or other network error of sorts
+				rconn:write("Network error on API request " .. target .. ":\n" .. stream, "\n")
+			end
+			if headers:get(":status") == "200" then
+				stream:save_body_to_file(stream_file_handle)
+				conn:write("ok")
+			elseif headers:get(":status") == "401" then
+				conn:write("API request " .. target .. " returned error 401: unauthorized.\nYour token may have expired, consider logging in again by passing --login.", "\n")
+			else
+				conn:write("API request " .. target .. " returned error " .. headers:get(":status") .. ".", "\n")
+			end
+		end)
+		io.stdout:write("WOOHOO ABOUT TO LOOP\n")
+		assert(cp:loop())
+		io.stdout:write("WOOHOO LOOPED\n")
+	end, options.plex_token, stream_file_name, tostring(require_hostname_validation), tostring(verify_server_certificates_str)
+	)
+
+	return self
+end
+
+
+function utils.DOWNLOADER:get(target)
+	io.stdout:write("DOWNLOADER:get ".. target, "\n")
+	self.conn:write(target, "\n")
+end
+
+function utils.DOWNLOADER:get_result()
+	return self.conn:read()
+end
+
+-- NOTA BENE: for the moment, this code is all duplicated
+-- hopefully, we'll eventually be able to use a downloader instance for all our requests
+-- especially considering that we plan to stream everything from local files
+function utils.DOWNLOADER.new(options, stream_file_name)
+	local self = {}
+	setmetatable(self, { __index = utils.DOWNLOADER })
+	
+	self.thread, self.conn = require("cqueues.thread").start(
+	function(conn, plex_token, stream_file_name, require_hostname_validation_str, verify_server_certificates_str)
+	-- this is a whole new VM so it's a complete blank slate
+	-- no globals, modules, upvalues or anything
+	-- only the arguments of the thread function
+		io.stdout:write("WOOHOO THREAD\n")
+		local http_request = require("http.request")
+		local cq = require("cqueues").new()
+		
+		io.stdout:write("FILE ", stream_file_name, "\n")
+		local stream_file_handle = io.open(stream_file_name, "w")
+		io.stdout:write("OPENED FILE\n")
+		
+		-- if we need to step around mismatched hostnames from the certificate
+		local http_tls = require("http.tls")
+		http_tls.has_hostname_validation = require_hostname_validation_str == "true"
+		local ssl_context = http_tls.new_client_context()
+		
+		-- if we need to skip certificate validation
+		if verify_server_certificates_str == "false" then
+			ssl_context:setVerify(require("openssl.ssl.context").VERIFY_NONE)
+		end
+		
+		cq:wrap(function()
+		-- read request address from socket, download to file
+			io.stdout:write("WOOHOO CQUEUE\n")
+			for target in conn:lines() do
+				io.stdout:write("DOWNLOADER: " .. target .. "\n")
+				local request = http_request.new_from_uri(target)
+				request.headers:append("x-plex-token", plex_token, true)
+				request.ctx = ssl_context
+				local headers, stream = request:go(10.0) -- 10 secs timeout
+				if not headers then
+					-- timeout or other network error of sorts
+					rconn:write("Network error on API request " .. target .. ":\n" .. stream, "\n")
+				end
+				if headers:get(":status") == "200" then
+					conn:write("ok\n")
+					stream:save_body_to_file(stream_file_handle)
+					conn:write("done\n")
+				elseif headers:get(":status") == "401" then
+					conn:write("API request " .. target .. " returned error 401: unauthorized.\nYour token may have expired, consider logging in again by passing --login.", "\n")
+				else
+					conn:write("API request " .. target .. " returned error " .. headers:get(":status") .. ".", "\n")
+				end
+			end
+		end)
+		io.stdout:write("WOOHOO ABOUT TO LOOP\n")
+		assert(cq:loop())
+		io.stdout:write("WOOHOO LOOPED\n")
+	end, options.plex_token, stream_file_name, tostring(require_hostname_validation), tostring(verify_server_certificates_str)
+	)
+
+	return self
+end
+
+
+function utils.DOWNLOADER:get(target)
+	io.stdout:write("DOWNLOADER:get ".. target, "\n")
+	self.conn:write(target, "\n")
+end
+
+function utils.DOWNLOADER:get_result(timeout)
+	return self.conn:read()
+--	return self.conn:xread("*l", "tlap", timeout)
+end
+-- =====================================
+
 return utils
