@@ -24,9 +24,6 @@ local PMCLI = {
 -- lua-http for networking
 local http_request = require("http.request")
 
--- html entities (escape sequences)
-local html_entities = require("htmlEntities")
-
 -- JSON parsing
 local json = require("dkjson").use_lpeg()
 
@@ -51,39 +48,39 @@ function pmcli.compute_title(item, parent_item)
     -- this should mean there is, generally speaking, available metadata
     if item.type == "episode" then
       -- for tv shows we want to show information on show title, season and episode number
-      if PMCLI.AMBIGUOUS_CONTEXTS[html_entities.decode(parent_item.title2)] and item.grandparentTitle and item.index and item.parentIndex then
+      if PMCLI.AMBIGUOUS_CONTEXTS[parent_item.title2] and item.grandparentTitle and item.index and item.parentIndex then
         -- menus where there is a jumble of shows and episodes, so we must show everything
         return string.format("%s S%02dE%02d - %s",
-                            html_entities.decode(item.grandparentTitle),
+                            item.grandparentTitle,
                             item.parentIndex,
                             item.index,
-                            html_entities.decode(item.title))
+                            item.title)
       elseif parent_item.mixedParents and item.index and item.parentIndex then
         -- mixedParents marks a generic promiscuous context, but we ruled out cases where shows are mixed
         -- so we only need season and episode
-        return string.format("S%02dE%02d - %s", item.parentIndex, item.index, html_entities.decode(item.title))
+        return string.format("S%02dE%02d - %s", item.parentIndex, item.index, item.title)
       elseif item.index then
         -- here we should be in a specific season, so we only need the episode
-        return string.format("E%02d - %s", item.index, html_entities.decode(item.title))
+        return string.format("E%02d - %s", item.index, item.title)
       end
     elseif item.type == "movie" and item.year then
       -- add year
-      return string.format("%s (%d)", html_entities.decode(item.title), item.year)
-    elseif item.type == "album" and parent_item.mixedParents and item.parentTitle then
-      -- prefix with artist name
-      return string.format("%s - %s", html_entities.decode(item.parentTitle), html_entities.decode(item.title))
+      return string.format("%s (%d)", item.title, item.year)
+    elseif (item.type == "album" or item.type == "season") and parent_item.mixedParents and item.parentTitle then
+      -- artist - album / show - season
+      return string.format("%s - %s", item.parentTitle, item.title)
     elseif item.type == "track" and parent_item.mixedParents and item.grandparentTitle and item.parentTitle then
       -- prefix with artist name and album
       return string.format("%s - %s - %s",
-                          html_entities.decode(item.grandparentTitle),
-                          html_entities.decode(item.parentTitle),
-                          html_entities.decode(item.title))
+                          item.grandparentTitle,
+                          item.parentTitle,
+                          item.title)
     end
     -- no need for or availability of further information
-    return html_entities.decode(item.title)
+    return item.title
   elseif item.Media and item.Media[1].Part[1] then
     -- infer title from corresponding filename, like POSIX basename util
-    return string.match(html_entities.decode(item.Media[1].Part[1].file), ".*/(.*)%..*")
+    return string.match(item.Media[1].Part[1].file, ".*/(.*)%..*")
   end
   -- either malformed item table or no media file to infer from
   return "Unknown title"
@@ -450,11 +447,31 @@ end
 
 function PMCLI:get_menu_items(reply, parent_key)
   local mc = reply.MediaContainer
-  if not mc or not mc.title1 then
+  if not mc then
     return nil, "Unexpected reply to API request " .. self.options.base_addr .. parent_key .. ":\n" .. utils.tostring(reply, true)
   end
   
   local items = {}
+  
+  -- the API is inconsistent in how it publishes titles
+  -- title2 is reasonably optional, as it marks nested contexts
+  -- title1 is always there, except for global Recently Added and On Deck
+  -- for the sake of compute_title, we amend the payload to correct this
+  if not mc.title1 then
+    mc.title1 = "Global"
+    if string.match(parent_key, "recentlyAdded") then
+      mc.title2 = "Recently Added"
+    elseif string.match(parent_key, "onDeck") then
+      mc.title2 = "On Deck"
+    end
+  end
+  
+  -- section title
+  if mc.title2 then
+    items.title = mc.title1 ..  " - " .. mc.title2
+  else
+    items.title = mc.title1
+  end
   
   -- libraries and relevant views (All, By Album etc.)
   if mc.Directory then
@@ -502,13 +519,6 @@ function PMCLI:get_menu_items(reply, parent_key)
         }
       end
     end
-  end
-
-  -- section title
-  if mc.title2 then
-    items.title = html_entities.decode(mc.title1) ..  " - " .. html_entities.decode(mc.title2)
-  else
-    items.title = html_entities.decode(mc.title1)
   end
   
   -- will determine if "0: .." or "0: quit"
@@ -668,7 +678,7 @@ end
 
 function PMCLI:run()
   io.stdout:write("Connecting to Plex Server...\n")
-  local _, errmsg = pcall(self.open_menu, self, { key = "/library/sections" })
+  local _, errmsg = pcall(self.open_menu, self, { key = "/library" })
   self:quit(errmsg)
 end
 
