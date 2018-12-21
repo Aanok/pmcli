@@ -1,3 +1,10 @@
+# 0.1.3
+2018/12/21
+
+- Reworked root menu: playlists, global Recently Added, global On Deck
+- Dropped htmlEntities dependency
+
+
 # 0.1.2
 2018/10/7
 
