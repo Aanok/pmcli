@@ -12,7 +12,8 @@ local PMCLI = {
     ["On Deck"] = true,
     ["Recently Added"] = true,
     ["Recently Aired"] = true,
-    ["Recently Viewed Episodes"] = true
+    ["Recently Viewed Episodes"] = true,
+    ["Playlist"] = true
   },
   IPC = {
     GET_PLAYBACK_TIME = '{ "command": ["get_property", "playback-time"], "request_id": 1 }\n'
@@ -456,6 +457,7 @@ function PMCLI:get_menu_items(reply, parent_key)
   -- the API is inconsistent in how it publishes titles
   -- title2 is reasonably optional, as it marks nested contexts
   -- title1 is always there, except for global Recently Added and On Deck
+  -- playlists just don't have either title1 or title2 :/
   -- for the sake of compute_title, we amend the payload to correct this
   if not mc.title1 then
     mc.title1 = "Global"
@@ -463,6 +465,12 @@ function PMCLI:get_menu_items(reply, parent_key)
       mc.title2 = "Recently Added"
     elseif string.match(parent_key, "onDeck") then
       mc.title2 = "On Deck"
+    elseif string.match(parent_key, "playlists$") then
+      mc.title2 = "Playlists"
+    elseif string.match(parent_key, "playlists/") then
+      mc.title1 = mc.title
+      mc.title2 = "Playlist"
+      mc.mixedParents = true
     end
   end
   
@@ -521,8 +529,6 @@ function PMCLI:get_menu_items(reply, parent_key)
     end
   end
   
-  -- will determine if "0: .." or "0: quit"
-  items.is_root = mc.viewGroup == nil
   return items
 end
 
@@ -657,17 +663,17 @@ function PMCLI:open_menu(parent_item)
     reply = nil
     utils.print_menu(items)
     for _,c in ipairs(utils.read_commands()) do
-        if c == "q" then
-          self:quit()
-        elseif c == "*" then
-          for _,item in ipairs(items) do
-            self:open_item(item)
-          end
-        elseif c == 0 then
-          return
-        elseif c > 0 and c <= #items then
-          self:open_item(items[c])
+      if c == "q" then
+        self:quit()
+      elseif c == "*" then
+        for _,item in ipairs(items) do
+          self:open_item(item)
         end
+      elseif c == 0 then
+        return
+      elseif c > 0 and c <= #items then
+        self:open_item(items[c])
+      end
     end
     -- if the last item was audio we must still play it
     self:playlist_try_play_all()
@@ -678,7 +684,38 @@ end
 
 function PMCLI:run()
   io.stdout:write("Connecting to Plex Server...\n")
-  local _, errmsg = pcall(self.open_menu, self, { key = "/library" })
+--  local _, errmsg = pcall(self.open_menu, self, { key = "/library" })
+  local _, errmsg = pcall(function()
+    while true do
+      local body = assert(self:plex_request("/library"))
+      local reply = assert(json.decode(body), "Malformed JSON reply to request " .. self.options.base_addr .. "/library:\n" .. body)
+      body = nil
+      local items = assert(self:get_menu_items(reply, "/library"))
+      reply = nil
+      -- manually add an entry point for playlists
+      items[#items +1] = {
+        title = "Playlists",
+        key = "/playlists",
+        tag = "L"
+      }
+      -- manually adjust title, plex returned an empty title2
+      items.title = "Plex Server"
+      utils.print_menu(items, true)
+      for _,c in ipairs(utils.read_commands()) do
+	if c == "q" then
+	  self:quit()
+	elseif c == "*" then
+	  for _,item in ipairs(items) do
+	    self:open_item(item)
+	  end
+	elseif c == 0 then
+	  return
+	elseif c > 0 and c <= #items then
+	  self:open_item(items[c])
+        end
+      end
+    end
+  end)
   self:quit(errmsg)
 end
 

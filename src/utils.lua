@@ -95,6 +95,11 @@ end
 
 
 function utils.join_keys(s1, s2)
+  -- special case: for playlist items we must replace everything
+  if string.match(s1, "playlists/") then
+    return s2
+  end
+  -- normal: concatenate but do not repeat overlap  (s1 suffix, s2 prefix)
   local i = 0
   local match_length = -1
   -- preprocessing: remove leading /
@@ -120,9 +125,9 @@ end
 
 
 -- ========== IO ==========
-function utils.print_menu(items)
+function utils.print_menu(items, is_root)
   io.stdout:write("\n=== " .. items.title .. " ===\n")
-  io.stdout:write(items.is_root and "0: quit\n" or "0: ..\n")
+  io.stdout:write(is_root and "0: quit\n" or "0: ..\n")
   for i = 1,#items do
     io.stdout:write(items[i].tag .. " " .. i .. ": " .. items[i].title .. "\n")
   end
