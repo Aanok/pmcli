@@ -11,7 +11,7 @@ description = {
 dependencies = {
    "lua >= 5.1",
    "http",
-   "dkjson",
+   "luaexpat",
    "lpeg"
 }
 build = {
