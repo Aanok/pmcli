@@ -411,6 +411,7 @@ end
 
 
 function PMCLI:play_media(playlist, force_resume)
+  require("pl.pretty").dump(playlist)
   local mpv_args = "--input-ipc-server=" .. self.mpv_socket_name  
   mpv_args = mpv_args .. " --http-header-fields='x-plex-token: " .. self.options.plex_token .. "'"
   mpv_args = mpv_args .. " --title='" .. utils.escape_quote(playlist[1].title) .. "'"
@@ -461,8 +462,7 @@ function PMCLI:play_media(playlist, force_resume)
     self.mpv_socket:write('{ "command": ["observe_property", 1, "playlist-pos-1"] }\n')
     local ok, err = self:mpv_socket_handle(playlist)
     if not ok then
-      err = require("cqueues.errno").strerror(err)
-      io.stderr:write("[!] IPC socket error: " .. err ..". Playback sync halted.\n" )
+      io.stderr:write("[!] IPC socket error: " .. require("cqueues.errno").strerror(err) ..". Playback sync halted.\n" )
       -- TODO: improve this
     end
   end
@@ -490,7 +490,7 @@ end
 
 
 function PMCLI:open_item(item, context)
-	if item.search ~= "" then
+	if item.search == "1" then
 		self:playlist_try_play_all()
 		self:local_search(item, context)
 	elseif item.name == "Directory" then
@@ -621,9 +621,9 @@ function PMCLI:print_menu(context)
 	local i = 1
 	for item in self.sax.items() do
 		local tag
-		if item.search and item.search ~= "" then
+		if item.search == "1" then
 			tag = "?"
-		elseif item.type and item.type == "" then
+		elseif item.type == "" then
 			tag = "D"
 		else
 			tag = item.name:sub(1,1):upper()
@@ -649,38 +649,12 @@ function PMCLI:open_menu(context)
 			elseif c == 0 then
 				return
 			elseif c > 0 and c <= self.sax.child_count then
-				require("pl.pretty").dump(self.sax.get(c))
 				self:open_item(self.sax.get(c), context)
 			end
 		end
+		-- if the last item was audio we must still play it
+		self:playlist_try_play_all()
 	end
-	-- if the last item was audio we must still play it
-	self:playlist_try_play_all()
---[[
-  while true do
-    local body = assert(self:plex_request(parent_item.key))
-    local reply = assert(json.decode(body), "Malformed JSON reply to request " .. self.options.base_addr .. parent_item.key ..":\n" .. body)
-    body = nil
-    local items = assert(self:get_menu_items(reply, parent_item.key))
-    reply = nil
-    utils.print_menu(items)
-    for _,c in ipairs(utils.read_commands()) do
-      if c == "q" then
-        self:quit()
-      elseif c == "*" then
-        for _,item in ipairs(items) do
-          self:open_item(item)
-        end
-      elseif c == 0 then
-        return
-      elseif c > 0 and c <= #items then
-        self:open_item(items[c])
-      end
-    end
-    -- if the last item was audio we must still play it
-    self:playlist_try_play_all()
-  end
---]]
 end
 -- =============================
 

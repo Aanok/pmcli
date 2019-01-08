@@ -262,13 +262,13 @@ function sax.get_current()
 		el.search = sax.body:read()
 		el.title = sax.body:read()
 	elseif el.name == "Track" then
-		el.duration = sax.body:read()
+		el.duration = tonumber(sax.body:read())
 		el.grandparent_title = sax.body:read()
 		el.mixed_parents = sax.body:read()
 		el.parent_title = sax.body:read()
 		el.rating_key = sax.body:read()
 		el.title = sax.body:read()
-		el.view_offset = sax.body:read()
+		el.view_offset = tonumber(sax.body:read())
 		el.file = sax.body:read()
 		el.part_key = sax.body:read()
 	elseif el.name == "Video" then
@@ -287,6 +287,11 @@ function sax.get_current()
 			el.title = sax.body:read()
 			el.file = sax.body:read()
 		end
+	end
+	-- second pass: reduce empty strings to nil
+	-- TODO: find a quicker, more elegant solution
+	for k,v in pairs(el) do
+		if v == "" then el[k] = nil end
 	end
 	return el
 end
