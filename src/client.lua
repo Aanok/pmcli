@@ -4,7 +4,7 @@ local pmcli = {}
 -- class
 -- we init some "static" values
 local PMCLI = {
-  VERSION = "0.1.3",
+  VERSION = "0.1.4",
   HELP_TEXT = [[Usage:
   pmcli [ --login ] [ --config configuration_file ]
   pmcli [ --help ] ]],
@@ -253,8 +253,7 @@ function PMCLI:request_token(login, pass, id)
   request.headers:append("x-plex-client-identifier", id)
   request.headers:append("x-plex-product", "pmcli")
   request.headers:append("x-plex-version", PMCLI.VERSION)
-  request.headers:delete(":method")
-  request.headers:append(":method", "POST")
+  request.headers:upsert(":method", "POST")
   request.headers:append("content-type", "application/x-www-form-urlencoded")
   request.headers:append("accept", "application/json")
   request:set_body("user%5blogin%5d=" .. http_encode(login) .. "&user%5bpassword%5d=" .. http_encode(pass))
