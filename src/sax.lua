@@ -90,7 +90,7 @@ end
 
 function sax.part_start(parser, name, attributes)
 	sax.body:write((attributes.file or "") .. "\n")
-	if cbx.looking_for_part == "Track" then
+	if sax.looking_for_part == "Track" then
 		sax.body:write((attributes.key or "") .. "\n")
 	end
 	sax.looking_for_part = nil
@@ -99,9 +99,8 @@ end
 
 function sax.track_start(parser, name, attributes)
 	sax.write_current_offset()
-	
+
 	sax.body:write(name .. "\n")
-	sax.body:write((attributes.type or "") .. "\n")
 	sax.body:write((attributes.duration or "") .. "\n")
 	sax.body:write((attributes.grandparentTitle or "") .. "\n")
 	sax.body:write((attributes.mixedParents or "") .. "\n")
@@ -160,10 +159,10 @@ function sax.media_container_end(parser, name)
 	sax.header:write((sax.header_attrs.title1 or "") .. "\n")
 	sax.header:write((sax.header_attrs.title2 or "") .. "\n")
 	sax.header_attrs = nil
-	sax.header:seek("set")
 	sax.header:flush() -- seek USUALLY also flushes, but it's not in the spec
+	sax.body:flush()
+	sax.header:seek("set")
 	sax.body:seek("set")
-	sax.header:flush()
 end
 
 
@@ -206,10 +205,7 @@ function sax.init(header_filename, body_filename, stream_filename)
 	sax.stream_filename = stream_filename
 	sax.uint_4b_sizeof = string.packsize("=I4")
 	sax.child_count = -1
-	sax.parser = require("lxp").new({
-		StartElement = sax.element_start,
-		EndElement = sax.element_end
-	})
+	sax.lxp = require("lxp")
 end
 
 
@@ -230,12 +226,14 @@ function sax.parse()
 	sax.header = io.open(sax.header_filename, "w+")
 	sax.body = io.open(sax.body_filename, "w+")
 	sax.child_count = 0
-	print(sax.stream_filename)
+	sax.parser = sax.lxp.new({
+		StartElement = sax.element_start,
+		EndElement = sax.element_end
+	})
 	for line in io.lines(sax.stream_filename) do
-		print("parsing line: " .. line)
 		sax.parser:parse(line)
 	end
-	print("BAR")
+	sax.parser:close()
 	return true
 end
 
@@ -254,18 +252,16 @@ end
 -- parses the item at the current seek position in body
 -- returning a Lua table
 function sax.get_current()
-	el = {}
-	local el_name = sax.body:read()
-	print(el_name)
-	if el_name == "Directory" or el_name == "Playlist" then
+	el = { name = sax.body:read() }
+	if el.name == "Directory" or el_name == "Playlist" then
 		el.type = sax.body:read()
-		el.index = sax.body:read()
+		el.index = tonumber(sax.body:read())
 		el.key = sax.body:read()
 		el.mixed_parents = sax.body:read()
 		el.parent_title = sax.body:read()
 		el.search = sax.body:read()
 		el.title = sax.body:read()
-	elseif el_name == "Track" then
+	elseif el.name == "Track" then
 		el.duration = sax.body:read()
 		el.grandparent_title = sax.body:read()
 		el.mixed_parents = sax.body:read()
@@ -274,8 +270,8 @@ function sax.get_current()
 		el.title = sax.body:read()
 		el.view_offset = sax.body:read()
 		el.file = sax.body:read()
-		el.part_key = c
-	elseif el_name == "Video" then
+		el.part_key = sax.body:read()
+	elseif el.name == "Video" then
 		el.type = sax.body:read()
 		if el.type == "movie" then
 			el.key = sax.body:read()
@@ -301,13 +297,12 @@ function sax.get(i)
 		-- out of bounds; could be parser wasn't run
 		return nil, "no such item available"
 	elseif i == 1 then
-		-- don't want to read the first number in the header
-		-- which is child_count
+		-- don't want to read the first number in the header, which is child_count
 		-- first child starts at 0 offset
 		sax.body:seek("set")
 	else
 		sax.header:seek("set", (i-1)*sax.uint_4b_sizeof)
-		sax.body:seek("set", string.unpack(sax.header:read(sax.uint_4b_sizeof)))
+		sax.body:seek("set", string.unpack("=I4", sax.header:read(sax.uint_4b_sizeof)))
 	end
 	return sax.get_current()
 end

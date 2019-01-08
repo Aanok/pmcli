@@ -125,14 +125,6 @@ end
 
 
 -- ========== IO ==========
-function utils.print_menu(items, is_root)
-  io.stdout:write("\n=== " .. items.title .. " ===\n")
-  io.stdout:write(is_root and "0: quit\n" or "0: ..\n")
-  for i = 1,#items do
-    io.stdout:write(items[i].tag .. " " .. i .. ": " .. items[i].title .. "\n")
-  end
-end
-
 function utils.confirm_yn(msg, default)
   io.stdout:write(msg .. " [y/n]\n")
   local yn = utils.read()

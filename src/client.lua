@@ -17,7 +17,16 @@ local PMCLI = {
   },
   IPC = {
     GET_PLAYBACK_TIME = '{ "command": ["get_property", "playback-time"], "request_id": 1 }\n'
-  }
+  },
+  ROOT_MENU = [[
+
+=== Plex Server ===
+0. quit
+L 1. Library Sections
+L 2. Recently Added Content
+L 3. On Deck Content
+L 4. Playlists
+]]
 }
 
 
@@ -43,20 +52,20 @@ local http_encode = require("http.util").encodeURIComponent
 
 
 -- ========== CONVENIENCIES ==========
-function pmcli.compute_title(item, parent_item)
+function pmcli.compute_title(item, media_container)
   if item.title and item.title ~= "" then
     -- title field is filled, use it
     -- this should mean there is, generally speaking, available metadata
     if item.type == "episode" then
       -- for tv shows we want to show information on show title, season and episode number
-      if PMCLI.AMBIGUOUS_CONTEXTS[parent_item.title2] and item.grandparent_title and item.index and item.parent_index then
+      if PMCLI.AMBIGUOUS_CONTEXTS[media_container.title2] and item.grandparent_title and item.index and item.parent_index then
         -- menus where there is a jumble of shows and episodes, so we must show everything
         return string.format("%s S%02dE%02d - %s",
                             item.grandparent_title,
                             item.parent_index,
                             item.index,
                             item.title)
-      elseif parent_item.mixed_parents and item.index and item.parent_index then
+      elseif media_container.mixed_parents and item.index and item.parent_index then
         -- mixedParents marks a generic promiscuous context, but we ruled out cases where shows are mixed
         -- so we only need season and episode
         return string.format("S%02dE%02d - %s", item.parent_index, item.index, item.title)
@@ -67,10 +76,10 @@ function pmcli.compute_title(item, parent_item)
     elseif item.type == "movie" and item.year then
       -- add year
       return string.format("%s (%d)", item.title, item.year)
-    elseif (item.type == "album" or item.type == "season") and parent_item.mixed_parents and item.parent_title then
+    elseif (item.type == "album" or item.type == "season") and media_container.mixed_parents and item.parent_title then
       -- artist - album / show - season
       return string.format("%s - %s", item.parent_title, item.title)
-    elseif item.type == "track" and parent_item.mixed_parents and item.grandparent_title and item.parent_title then
+    elseif item.type == "track" and media_container.mixed_parents and item.grandparent_title and item.parent_title then
       -- prefix with artist name and album
       return string.format("%s - %s - %s",
                           item.grandparent_title,
@@ -299,7 +308,7 @@ function PMCLI:plex_request(suffix, to_file)
 	local request = http_request.new_from_uri(self.options.base_addr ..  suffix)
 	request.ctx = self.ssl_context
 	self:setup_headers(request.headers)
-	local headers, stream = request:go(10.0) -- 10 secs timeout
+	local headers, stream = request:go(20.0) -- 10 secs timeout
 	if not headers then
 		-- timeout or other network error of sorts
 		return nil, "Network error on API request " .. self.options.base_addr .. suffix .. ":\n" .. stream
@@ -463,93 +472,6 @@ function PMCLI:play_media(playlist, force_resume)
 end
 
 
-function PMCLI:get_menu_items(reply, parent_key)
-  local mc = self.sax.get_media_container()
-  if not mc then
-    return nil, "Unexpected reply to API request " .. self.options.base_addr .. parent_key .. ":\n" .. utils.tostring(reply, true)
-  end
-  
-  local items = {}
-  
-  -- the API is inconsistent in how it publishes titles
-  -- title2 is reasonably optional, as it marks nested contexts
-  -- title1 is always there, except for global Recently Added and On Deck
-  -- playlists just don't have either title1 or title2 :/
-  -- for the sake of compute_title, we amend the payload to correct this
-  if not mc.title1 then
-    mc.title1 = "Global"
-    if string.match(parent_key, "recentlyAdded") then
-      mc.title2 = "Recently Added"
-    elseif string.match(parent_key, "onDeck") then
-      mc.title2 = "On Deck"
-    elseif string.match(parent_key, "playlists$") then
-      mc.title2 = "Playlists"
-    elseif string.match(parent_key, "playlists/") then
-      mc.title1 = mc.title
-      mc.title2 = "Playlist"
-      mc.mixed_parents = true
-    end
-  end
-  
-  -- section title
-  if mc.title2 then
-    items.title = mc.title1 ..  " - " .. mc.title2
-  else
-    items.title = mc.title1
-  end
-  
-  -- libraries and relevant views (All, By Album etc.)
-  if mc.Directory then
-    for i = 1,#mc.Directory do
-      local item = mc.Directory[i]
-      items[#items + 1] = {
-        title = pmcli.compute_title(item, mc),
-        key = utils.join_keys(parent_key, item.key),
-      }
-      if item.search then
-        items[#items].tag = "?"
-      else
-        items[#items].tag = "L"
-      end
-    end
-  end
-  -- actual items
-  if mc.Metadata then
-    for i = 1,#mc.Metadata do
-      local item = mc.Metadata[i]
-      if item.type == "track" then
-      -- audio: ready for streaming
-        items[#items + 1] = {
-          title = pmcli.compute_title(item, mc),
-          duration = item.duration,
-          view_offset = item.viewOffset,
-          offset_to_part = 0,
-          rating_key = item.ratingKey,
-          part_key = utils.join_keys(parent_key, item.Media[1].Part[1].key),
-          tag = "T"
-        }
-      elseif item.type == "episode" or item.type == "movie" then
-      -- video: will require fetching metadata before streaming
-        items[#items + 1] = {
-          title = pmcli.compute_title(item, mc),
-          key = item.key,
-          tag = item.type:sub(1,1):upper() -- E, M
-        }
-      else
-      -- some kind of directory; NB this includes when type is nil which, afaik, is only for folders in "By Folder" view
-        items[#items + 1] = {
-          title = pmcli.compute_title(item, mc),
-          key = item.key,
-          tag = "D"
-        }
-      end
-    end
-  end
-  
-  return items
-end
-
-
 function PMCLI:playlist_enqueue(item)
   if not self.playlist then
     self.playlist = { item }
@@ -567,19 +489,19 @@ function PMCLI:playlist_try_play_all()
 end
 
 
-function PMCLI:open_item(item)
-  if item.tag == "D" or item.tag == "L" then
-    self:playlist_try_play_all()
-    self:open_menu(item)
-  elseif item.tag == "T" then
-    self:playlist_enqueue(item)
-  elseif item.tag == "M" or item.tag == "E" then
-    self:playlist_try_play_all()
-    self:play_video(item)
-  elseif item.tag == "?" then
-    self:playlist_try_play_all()
-    self:local_search(item)
-  end
+function PMCLI:open_item(item, context)
+	if item.search ~= "" then
+		self:playlist_try_play_all()
+		self:local_search(item, context)
+	elseif item.name == "Directory" then
+		self:playlist_try_play_all()
+		self:open_menu(utils.join_keys(context, item.key))
+	elseif item.name == "Track" then
+		self:playlist_enqueue(item)
+	elseif item.name == "Movie" or item.name == "Episode" then
+		self:playlist_try_play_all()
+		self:play_video(item)
+	end
 end
 
 
@@ -663,15 +585,78 @@ function PMCLI:play_video(item)
 end
 
 
-function PMCLI:local_search(search_item)
+function PMCLI:local_search(search_item, context)
   io.stdout:write("Query? > ");
   local query = "&query=" .. http_encode(io.read())
   search_item.key = search_item.key .. query
-  self:open_menu(search_item)
+  self:open_menu(utils.join_keys(context, search_item.key))
 end
 
 
-function PMCLI:open_menu(parent_item)
+function PMCLI:print_menu(context)
+	local mc = self.sax.get_media_container()
+	
+	-- the API is inconsistent in how it publishes titles
+	-- title2 is reasonably optional, as it marks nested contexts
+	-- title1 is always there, except for global Recently Added and On Deck
+	-- playlists just don't have either title1 or title2 :/
+	-- for the sake of compute_title, we amend the payload to correct this
+	if mc.title1 == "" then
+		mc.title1 = "Global"
+		if string.match(context, "recentlyAdded") then
+			mc.title2 = "Recently Added"
+		elseif string.match(context, "onDeck") then
+			mc.title2 = "On Deck"
+		elseif string.match(context, "playlists$") then
+			mc.title2 = "Playlists"
+		elseif string.match(context, "playlists/") then
+			mc.title1 = mc.title
+			mc.title2 = "Playlist"
+			mc.mixed_parents = true
+		end
+	end
+	
+	io.stdout:write("\n=== " .. mc.title1 .. (mc.title2 ~= "" and  " - " .. mc.title2 or "") .. " ===\n")
+	io.stdout:write("0: ..\n")
+	local i = 1
+	for item in self.sax.items() do
+		local tag
+		if item.search and item.search ~= "" then
+			tag = "?"
+		elseif item.type and item.type == "" then
+			tag = "D"
+		else
+			tag = item.name:sub(1,1):upper()
+		end
+		io.stdout:write(tag .. " " .. i .. ": " .. pmcli.compute_title(item, mc) .. "\n")
+		i = i + 1
+	end
+end
+
+
+function PMCLI:open_menu(context)
+	while true do
+		assert(self:plex_request(context, true))
+		assert(self.sax.parse(), "XML parsing error for request " .. self.options.base_addr .. context .. "\n")
+		self:print_menu(context)
+		for _,c in ipairs(utils.read_commands()) do
+			if c == "q" then
+				self:quit()
+			elseif c == "*" then
+				for item in self.sax.items() do
+					self:open_item(item, context)
+				end
+			elseif c == 0 then
+				return
+			elseif c > 0 and c <= self.sax.child_count then
+				require("pl.pretty").dump(self.sax.get(c))
+				self:open_item(self.sax.get(c), context)
+			end
+		end
+	end
+	-- if the last item was audio we must still play it
+	self:playlist_try_play_all()
+--[[
   while true do
     local body = assert(self:plex_request(parent_item.key))
     local reply = assert(json.decode(body), "Malformed JSON reply to request " .. self.options.base_addr .. parent_item.key ..":\n" .. body)
@@ -695,44 +680,37 @@ function PMCLI:open_menu(parent_item)
     -- if the last item was audio we must still play it
     self:playlist_try_play_all()
   end
+--]]
 end
 -- =============================
 
 
 function PMCLI:run()
-  io.stdout:write("Connecting to Plex Server...\n")
---  local _, errmsg = pcall(self.open_menu, self, { key = "/library" })
-  local _, errmsg = pcall(function()
-    while true do
-      assert(self:plex_request("/library", true))
-      assert(self.sax.parse(), "Malformed XML reply to request " .. self.options.base_addr .. "/library")
-      local items = assert(self:get_menu_items(reply, "/library"))
-      reply = nil
-      -- manually add an entry point for playlists
-      items[#items +1] = {
-        title = "Playlists",
-        key = "/playlists",
-        tag = "L"
-      }
-      -- manually adjust title, plex returned an empty title2
-      items.title = "Plex Server"
-      utils.print_menu(items, true)
-      for _,c in ipairs(utils.read_commands()) do
-	if c == "q" then
-	  self:quit()
-	elseif c == "*" then
-	  for _,item in ipairs(items) do
-	    self:open_item(item)
-	  end
-	elseif c == 0 then
-	  return
-	elseif c > 0 and c <= #items then
-	  self:open_item(items[c])
-        end
-      end
-    end
-  end)
-  self:quit(errmsg)
+	io.stdout:write("Connecting to Plex Server...\n")
+	local _, errmsg = pcall(function()
+		local keys = {
+			"/library/sections",
+			"/library/recentlyAdded",
+			"/library/onDeck",
+			"/playlists"
+		}
+		while true do
+			-- top menu has custom entries, so we manipulate it by hand (heh)
+			io.stdout:write(PMCLI.ROOT_MENU)
+			for _,c in ipairs(utils.read_commands()) do
+				if c == "q" or c == 0 then
+					self:quit()
+				elseif c == "*" then
+					for i = 1,4 do
+						self:open_menu(keys[i])
+					end
+				elseif c > 0 and c < 5 then
+					self:open_menu(keys[c])
+				end
+			end
+		end
+	end)
+	self:quit(errmsg)
 end
 
 
