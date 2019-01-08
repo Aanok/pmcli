@@ -147,13 +147,21 @@ function pmcli.new(args)
     self.ssl_context:setVerify(require("openssl.ssl.context").VERIFY_NONE)
   end
   
+  -- for tmp files we use a common suffix for tidyness' sake
+  local tmpname = os.tmpname()
+  os.remove(tmpname) -- it was touch'd to reserve it
+  tmpname = tmpname .. "_pmcli"
+  
+  -- save HTTP replies locally
+  self.stream_filename = tmpname .. "_stream"
+  
   -- IPC socket
-  self.mpv_socket_name = os.tmpname() .. "_socket"
+  self.mpv_socket_name = tmpname .. "_socket"
   socket.settimeout(10.0) -- new default
   
   -- parser
   self.sax = require("pmcli.sax")
-  self.sax.init(os.tmpname() .. "_header", os.tmpname() .. "_body")
+  self.sax.init(tmpname .. "_header", tmpname .. "_body", self.stream_filename)
   
   return self
 end
@@ -212,7 +220,7 @@ function PMCLI:login()
     end
     plex_token, errmsg = self:request_token(login, password, unique_identifier)
     if not plex_token then
-      io.stderr:write("[!!] Authentication error:\n", errmsg .. "\n")
+      io.stderr:write("[!!] Authentication error: ", errmsg .. "\n")
       if not utils.confirm_yn("Would you like to try again with new credentials?") then
         self:quit("Configuration was unsuccessful.")
       end
@@ -251,26 +259,22 @@ end
 
 -- token request
 function PMCLI:request_token(login, pass, id)
-  local request = http_request.new_from_uri("https://plex.tv/users/sign_in.json")
+  local request = http_request.new_from_uri("https://plex.tv/users/sign_in.xml")
   request.headers:upsert(":method", "POST")
   request.headers:append("content-type", "application/x-www-form-urlencoded")
-  request.headers:append("accept", "application/json")
   request.headers:append("x-plex-client-identifier", id)
   request.headers:append("x-plex-product", "pmcli")
   request.headers:append("x-plex-version", PMCLI.VERSION)
-  require("pl.pretty").dump(request.headers)
   request:set_body("user%5blogin%5d=" .. http_encode(login) .. "&user%5bpassword%5d=" .. http_encode(pass))
   local headers, stream = request:go()
   if not headers then
     self:quit("Network error on token request: " .. stream)
   end
   local reply = lxp_lom.parse(stream:get_body_as_string())
-  require("pl.pretty").dump(reply)
-  self:quit()
-  if reply.error then
-    return nil, reply.error
+  if reply[2].tag == "error" then
+    return nil, reply[2][1] -- error msg
   else
-    return reply.user.authentication_token
+    return reply.attr.authentication_token
   end
 end
 -- ===========================
@@ -279,6 +283,8 @@ end
 -- ========== MEMBERS ==========
 function PMCLI:quit(error_message)
   if self.mpv_socket_name then os.remove(self.mpv_socket_name) end
+  if self.sax then self.sax.destroy() end
+  if self.stream_filename then os.remove(self.stream_filename) end
   os.execute("stty " .. utils.stty_save) -- in case of fatal errors while mpv is running
   if error_message then
     io.stderr:write("[!!!] " .. error_message ..  "\n")
@@ -289,22 +295,29 @@ function PMCLI:quit(error_message)
 end
 
 
-function PMCLI:plex_request(suffix)
-  local request = http_request.new_from_uri(self.options.base_addr ..  suffix)
-  request.ctx = self.ssl_context
-  self:setup_headers(request.headers)
-  local headers, stream = request:go(10.0) -- 10 secs timeout
-  if not headers then
-    -- timeout or other network error of sorts
-    return nil, "Network error on API request " .. self.options.base_addr .. suffix .. ":\n" .. stream
-  end
-  if headers:get(":status") == "200" then
-    return stream:get_body_as_string()
-  elseif headers:get(":status") == "401" then
-    return nil, "API request " .. self.options.base_addr .. suffix .. " returned error 401: unauthorized.\nYour token may have expired, consider logging in again by passing --login."
-  else
-    return nil, "API request " .. self.options.base_addr .. suffix .. " returned error " .. headers:get(":status") .. "."
-  end
+function PMCLI:plex_request(suffix, to_file)
+	local request = http_request.new_from_uri(self.options.base_addr ..  suffix)
+	request.ctx = self.ssl_context
+	self:setup_headers(request.headers)
+	local headers, stream = request:go(10.0) -- 10 secs timeout
+	if not headers then
+		-- timeout or other network error of sorts
+		return nil, "Network error on API request " .. self.options.base_addr .. suffix .. ":\n" .. stream
+	end
+	if headers:get(":status") == "200" then
+		if to_file then
+			self.stream_file_handle = io.open(self.stream_filename, "w")
+			stream:save_body_to_file(self.stream_file_handle)
+			self.stream_file_handle:close()
+			return true
+		else
+			return stream:get_body_as_string()
+		end
+	elseif headers:get(":status") == "401" then
+		return nil, "API request " .. self.options.base_addr .. suffix .. " returned error 401: unauthorized.\nYour token may have expired, consider logging in again by passing --login."
+	else
+		return nil, "API request " .. self.options.base_addr .. suffix .. " returned error " .. headers:get(":status") .. "."
+	end
 end
 
 
@@ -451,7 +464,7 @@ end
 
 
 function PMCLI:get_menu_items(reply, parent_key)
-  local mc = reply.MediaContainer
+  local mc = self.sax.get_media_container()
   if not mc then
     return nil, "Unexpected reply to API request " .. self.options.base_addr .. parent_key .. ":\n" .. utils.tostring(reply, true)
   end
@@ -474,7 +487,7 @@ function PMCLI:get_menu_items(reply, parent_key)
     elseif string.match(parent_key, "playlists/") then
       mc.title1 = mc.title
       mc.title2 = "Playlist"
-      mc.mixedParents = true
+      mc.mixed_parents = true
     end
   end
   
@@ -691,9 +704,8 @@ function PMCLI:run()
 --  local _, errmsg = pcall(self.open_menu, self, { key = "/library" })
   local _, errmsg = pcall(function()
     while true do
-      local body = assert(self:plex_request("/library"))
-      local reply = assert(json.decode(body), "Malformed JSON reply to request " .. self.options.base_addr .. "/library:\n" .. body)
-      body = nil
+      assert(self:plex_request("/library", true))
+      assert(self.sax.parse(), "Malformed XML reply to request " .. self.options.base_addr .. "/library")
       local items = assert(self:get_menu_items(reply, "/library"))
       reply = nil
       -- manually add an entry point for playlists
