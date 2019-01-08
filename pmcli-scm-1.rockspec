@@ -9,16 +9,16 @@ description = {
    license = "MIT"
 }
 dependencies = {
-   "lua >= 5.1",
+   "lua >= 5.3",
    "http",
-   "luaexpat",
-   "lpeg"
+   "luaexpat"
 }
 build = {
    type = "builtin",
    modules = {
       ["pmcli.client"] = "src/client.lua",
-      ["pmcli.utils"] = "src/utils.lua"
+      ["pmcli.utils"] = "src/utils.lua",
+      ["pmcli.sax"] = "src/sax.lua"
    },
    install = {
     bin = {

@@ -5,9 +5,9 @@
 **Disclaimer**: the client is a side project and learning experience for me. No guarantee whatsoever is offered about it. The target OS is Linux only.
 
 ## Dependencies
-* Lua >= 5.1 (LuaJIT too, although there is no reason to use it)
+* Lua >= 5.3
 * [lua-http](https://github.com/daurnimator/lua-http)
-* [dkjson](https://github.com/LuaDist/dkjson)
+* [luaexpat](http://www.keplerproject.org/luaexpat/)
 * [mpv](https://mpv.io/) must be installed so that `mpv` is in PATH.
 
 ## Installation
