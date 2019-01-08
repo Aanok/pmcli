@@ -1,3 +1,9 @@
+# 0.1.4
+2019/1/8
+
+ - Made login requests comply to HTTP/2 pseudoheader order spec
+
+
 # 0.1.3
 2018/12/21
 

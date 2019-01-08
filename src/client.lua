@@ -4,7 +4,7 @@ local pmcli = {}
 -- class
 -- we init some "static" values
 local PMCLI = {
-  VERSION = "0.1.3",
+  VERSION = "0.1.4",
   HELP_TEXT = [[Usage:
   pmcli [ --login ] [ --config configuration_file ]
   pmcli [ --help ] ]],
@@ -25,11 +25,11 @@ local PMCLI = {
 -- lua-http for networking
 local http_request = require("http.request")
 
--- JSON parsing
-local json = require("dkjson").use_lpeg()
-
 -- our own utils
 local utils = require("pmcli.utils")
+
+-- in-memory XML parser
+local lxp_lom = require("lxp.lom")
 
 -- mpv IPC
 local socket = require("cqueues.socket")
@@ -49,17 +49,17 @@ function pmcli.compute_title(item, parent_item)
     -- this should mean there is, generally speaking, available metadata
     if item.type == "episode" then
       -- for tv shows we want to show information on show title, season and episode number
-      if PMCLI.AMBIGUOUS_CONTEXTS[parent_item.title2] and item.grandparentTitle and item.index and item.parentIndex then
+      if PMCLI.AMBIGUOUS_CONTEXTS[parent_item.title2] and item.grandparent_title and item.index and item.parent_index then
         -- menus where there is a jumble of shows and episodes, so we must show everything
         return string.format("%s S%02dE%02d - %s",
-                            item.grandparentTitle,
-                            item.parentIndex,
+                            item.grandparent_title,
+                            item.parent_index,
                             item.index,
                             item.title)
-      elseif parent_item.mixedParents and item.index and item.parentIndex then
+      elseif parent_item.mixed_parents and item.index and item.parent_index then
         -- mixedParents marks a generic promiscuous context, but we ruled out cases where shows are mixed
         -- so we only need season and episode
-        return string.format("S%02dE%02d - %s", item.parentIndex, item.index, item.title)
+        return string.format("S%02dE%02d - %s", item.parent_index, item.index, item.title)
       elseif item.index then
         -- here we should be in a specific season, so we only need the episode
         return string.format("E%02d - %s", item.index, item.title)
@@ -67,27 +67,26 @@ function pmcli.compute_title(item, parent_item)
     elseif item.type == "movie" and item.year then
       -- add year
       return string.format("%s (%d)", item.title, item.year)
-    elseif (item.type == "album" or item.type == "season") and parent_item.mixedParents and item.parentTitle then
+    elseif (item.type == "album" or item.type == "season") and parent_item.mixed_parents and item.parent_title then
       -- artist - album / show - season
-      return string.format("%s - %s", item.parentTitle, item.title)
-    elseif item.type == "track" and parent_item.mixedParents and item.grandparentTitle and item.parentTitle then
+      return string.format("%s - %s", item.parent_title, item.title)
+    elseif item.type == "track" and parent_item.mixed_parents and item.grandparent_title and item.parent_title then
       -- prefix with artist name and album
       return string.format("%s - %s - %s",
-                          item.grandparentTitle,
-                          item.parentTitle,
+                          item.grandparent_title,
+                          item.parent_title,
                           item.title)
     end
     -- no need for or availability of further information
     return item.title
-  elseif item.Media and item.Media[1].Part[1] then
+  elseif item.file then
     -- infer title from corresponding filename, like POSIX basename util
-    return string.match(item.Media[1].Part[1].file, ".*/(.*)%..*")
+    return string.match(item.file, ".*/(.*)%..*")
   end
   -- either malformed item table or no media file to infer from
   return "Unknown title"
 end
 -- ===================================
-
 
 -- ========== SETUP ==========
 -- constructor
@@ -149,8 +148,12 @@ function pmcli.new(args)
   end
   
   -- IPC socket
-  self.mpv_socket_name = os.tmpname()
+  self.mpv_socket_name = os.tmpname() .. "_socket"
   socket.settimeout(10.0) -- new default
+  
+  -- parser
+  self.sax = require("pmcli.sax")
+  self.sax.init(os.tmpname() .. "_header", os.tmpname() .. "_body")
   
   return self
 end
@@ -193,7 +196,6 @@ function PMCLI:setup_headers(headers)
   headers:append("x-plex-product", "pmcli")
   headers:append("x-plex-version", PMCLI.VERSION)
   headers:append("x-plex-token", self.options.plex_token, true)
-  headers:append("accept", "application/json")
 end
 
 
@@ -250,19 +252,21 @@ end
 -- token request
 function PMCLI:request_token(login, pass, id)
   local request = http_request.new_from_uri("https://plex.tv/users/sign_in.json")
+  request.headers:upsert(":method", "POST")
+  request.headers:append("content-type", "application/x-www-form-urlencoded")
+  request.headers:append("accept", "application/json")
   request.headers:append("x-plex-client-identifier", id)
   request.headers:append("x-plex-product", "pmcli")
   request.headers:append("x-plex-version", PMCLI.VERSION)
-  request.headers:delete(":method")
-  request.headers:append(":method", "POST")
-  request.headers:append("content-type", "application/x-www-form-urlencoded")
-  request.headers:append("accept", "application/json")
+  require("pl.pretty").dump(request.headers)
   request:set_body("user%5blogin%5d=" .. http_encode(login) .. "&user%5bpassword%5d=" .. http_encode(pass))
   local headers, stream = request:go()
   if not headers then
     self:quit("Network error on token request: " .. stream)
   end
-  local reply = json.decode(stream:get_body_as_string())
+  local reply = lxp_lom.parse(stream:get_body_as_string())
+  require("pl.pretty").dump(reply)
+  self:quit()
   if reply.error then
     return nil, reply.error
   else
