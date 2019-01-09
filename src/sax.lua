@@ -69,14 +69,8 @@ local sax = {}
 
 
 -- ========== INTERNAL USE ==========
-function sax.write_current_offset()
-	-- fmt string means native endianness, unsigned 4B integer
-	sax.header:write(string.pack("=I4", sax.body:seek()))
-end
-
-
 function sax.directory_start(parser, name, attributes)
-	sax.write_current_offset()
+	sax.header:write(string.pack(sax.uint_4b_fmt, sax.body:seek()))
 	
 	sax.body:write(name .. "\n")
 	sax.body:write((attributes.type or "") .. "\n")
@@ -98,7 +92,7 @@ end
 
 
 function sax.track_start(parser, name, attributes)
-	sax.write_current_offset()
+	sax.header:write(string.pack(sax.uint_4b_fmt, sax.body:seek()))
 
 	sax.body:write(name .. "\n")
 	sax.body:write((attributes.duration or "") .. "\n")
@@ -114,7 +108,7 @@ end
 
 
 function sax.movie_start(parser, name, attributes)
-	sax.write_current_offset()
+	sax.header:write(string.pack(sax.uint_4b_fmt, sax.body:seek()))
 
 	sax.body:write(name .. "\n")
 	sax.body:write((attributes.type or "") .. "\n")
@@ -127,7 +121,7 @@ end
 
 
 function sax.episode_start(parser, name, attributes)
-	sax.write_current_offset()
+	sax.header:write(string.pack(sax.uint_4b_fmt, sax.body:seek()))
 
 	sax.body:write(name .. "\n")
 	sax.body:write((attributes.type or "") .. "\n")
@@ -145,11 +139,6 @@ end
 function sax.media_container_start(parser, name, attributes)
 	-- save attributes, we will write them at the end of the header
 	sax.header_attrs = attributes
-end
-
-
-function sax.playlist_start(parser, name, attributes)
-	
 end
 
 
@@ -203,8 +192,8 @@ function sax.init(header_filename, body_filename, stream_filename)
 	sax.header_filename = header_filename
 	sax.body_filename = body_filename
 	sax.stream_filename = stream_filename
-	sax.uint_4b_sizeof = string.packsize("=I4")
-	sax.child_count = -1
+	sax.uint_4b_fmt = "=I4" -- native endianness, unsigned 4B integer
+	sax.uint_4b_sizeof = string.packsize(sax.uint_4b_fmt) -- always 4 but w/e
 	sax.lxp = require("lxp")
 end
 
@@ -222,16 +211,18 @@ end
 
 
 function sax.parse()
+	if not sax.uint_4b_sizeof then return nil, "parser not initialized" end
 	-- open/reset local buffer files
-	sax.header = io.open(sax.header_filename, "w+")
-	sax.body = io.open(sax.body_filename, "w+")
+	sax.header = assert(io.open(sax.header_filename, "w+"))
+	sax.body = assert(io.open(sax.body_filename, "w+"))
 	sax.child_count = 0
 	sax.parser = sax.lxp.new({
 		StartElement = sax.element_start,
 		EndElement = sax.element_end
 	})
 	for line in io.lines(sax.stream_filename) do
-		sax.parser:parse(line)
+		local ok, msg, line, col, pos = sax.parser:parse(line)
+		if not ok then return nil, msg, line, col, pos end
 	end
 	sax.parser:close()
 	return true
@@ -294,7 +285,7 @@ function sax.get_current()
 	end
 	-- second pass: reduce empty strings to nil
 	-- this sounds slow, but it's only critical during printing,
-	-- where the bottleneck is vastly due to the terminal. all good then
+	-- where the bottleneck is vastly due to the terminal
 	for k,v in pairs(el) do
 		if v == "" then el[k] = nil end
 	end

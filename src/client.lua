@@ -101,6 +101,7 @@ function pmcli.quit(error_message)
   if pmcli.mpv_socket_name then os.remove(pmcli.mpv_socket_name) end
   if pmcli.sax then pmcli.sax.destroy() end
   if pmcli.stream_filename then os.remove(pmcli.stream_filename) end
+  if pmcli.session_filename then os.remove(pmcli.session_filename) end
   os.execute("stty " .. utils.stty_save) -- in case of fatal errors while mpv is running
   if error_message then
     io.stderr:write("[!!!] " .. error_message ..  "\n")
@@ -122,9 +123,9 @@ function pmcli.plex_request(suffix, to_file)
 	end
 	if headers:get(":status") == "200" then
 		if to_file then
-			pmcli.stream_file_handle = io.open(pmcli.stream_filename, "w")
+			pmcli.stream_file_handle = assert(io.open(pmcli.stream_filename, "w"))
 			stream:save_body_to_file(pmcli.stream_file_handle)
-			pmcli.stream_file_handle:close()
+			assert(pmcli.stream_file_handle:close())
 			return true
 		else
 			return stream:get_body_as_string()
@@ -681,21 +682,27 @@ function pmcli.init(args)
     pmcli.ssl_context:setVerify(require("openssl.ssl.context").VERIFY_NONE)
   end
   
-  -- for tmp files we use a common suffix for tidyness' sake
-  local tmpname = os.tmpname()
-  os.remove(tmpname) -- it was touch'd to reserve it
-  tmpname = tmpname .. "_pmcli"
   
-  -- save HTTP replies locally
-  pmcli.stream_filename = tmpname .. "_stream"
+  -- temp files
+  assert(os.execute("mkdir -p -m 700 /tmp/pmcli"))
+  pmcli.session_filename = "/tmp/pmcli/" .. utils.generate_random_id(10)
+  -- overkill: ensure session id isn't already taken for some reason
+  _,_,error_code = os.rename(pmcli.session_filename, pmcli.session_filename)
+  while error_code ~= 2 do -- until "no such file"
+    pmcli.session_filename = "/tmp/pmcli/" .. utils.generate_random_id(10)
+    _,_,error_code = os.rename(pmcli.session_filename, pmcli.session_filename)
+  end
+  assert(assert(io.open(pmcli.session_filename, "w"):close()))
   
-  -- IPC socket
-  pmcli.mpv_socket_name = tmpname .. "_socket"
+  print(pmcli.session_filename)
+  
+  pmcli.stream_filename = pmcli.session_filename .. "_stream"
+  
+  pmcli.mpv_socket_name = pmcli.session_filename .. "_socket"
   socket.settimeout(10.0) -- new default
   
-  -- parser
   pmcli.sax = require("pmcli.sax")
-  pmcli.sax.init(tmpname .. "_header", tmpname .. "_body", pmcli.stream_filename)
+  pmcli.sax.init(pmcli.session_filename .. "_header", pmcli.session_filename .. "_body", pmcli.stream_filename)
 end
 -- ===========================
 

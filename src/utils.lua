@@ -78,14 +78,13 @@ function utils.escape_quote(str)
 end
 
 
-function utils.generate_random_id()
-  -- string of 32 random digits
+function utils.generate_random_id(len)
   math.randomseed(os.time())
-  local id = ""
-  for i = 1,32 do
-    id = id .. math.random(0,9)
+  local id = {}
+  for i = 1, len or 32 do
+    id[#id +1] = math.random(0,9)
   end
-  return id
+  return table.concat(id)
 end
 
 
