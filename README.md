@@ -10,6 +10,10 @@
 * [luaexpat](http://www.keplerproject.org/luaexpat/)
 * [mpv](https://mpv.io/) must be installed so that `mpv` is in PATH.
 
+To avoid adding a further dependency and given it is currently employed only for a minor use-case, the source file 
+from [dkjson](http://dkolf.de/src/dkjson-lua.fsl/home) is directly included in the repo. This is likely a temporary 
+measure.
+
 ## Installation
 `luarocks install --server=http://luarocks.org/dev pmcli`. You will then need to manually make sure mpv is installed.
 

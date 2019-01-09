@@ -245,6 +245,10 @@ function sax.get_media_container()
 	mc.title = sax.header:read()
 	mc.title1 = sax.header:read()
 	mc.title2 = sax.header:read()
+	-- second pass: null empty strings
+	for k,v in pairs(mc) do
+		if v == "" then mc[k] = nil end
+	end
 	return mc
 end
 
@@ -253,7 +257,7 @@ end
 -- returning a Lua table
 function sax.get_current()
 	el = { name = sax.body:read() }
-	if el.name == "Directory" or el_name == "Playlist" then
+	if el.name == "Directory" or el.name == "Playlist" then
 		el.type = sax.body:read()
 		el.index = tonumber(sax.body:read())
 		el.key = sax.body:read()
@@ -289,7 +293,8 @@ function sax.get_current()
 		end
 	end
 	-- second pass: reduce empty strings to nil
-	-- TODO: find a quicker, more elegant solution
+	-- this sounds slow, but it's only critical during printing,
+	-- where the bottleneck is vastly due to the terminal. all good then
 	for k,v in pairs(el) do
 		if v == "" then el[k] = nil end
 	end

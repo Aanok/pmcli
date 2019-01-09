@@ -18,7 +18,8 @@ build = {
    modules = {
       ["pmcli.client"] = "src/client.lua",
       ["pmcli.utils"] = "src/utils.lua",
-      ["pmcli.sax"] = "src/sax.lua"
+      ["pmcli.sax"] = "src/sax.lua",
+      ["pmcli.dkjson"] = "src/dkjson.lua"
    },
    install = {
     bin = {
