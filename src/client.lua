@@ -42,6 +42,7 @@ local lxp_lom = require("lxp.lom")
 
 -- mpv IPC
 local socket = require("cqueues.socket")
+local json = require("pmcli.dkjson")
 
 -- to drive mpv in parallel
 local thread = require("cqueues.thread")
@@ -473,6 +474,7 @@ end
 
 
 function PMCLI:playlist_enqueue(item)
+  item.offset_to_part = 0 -- bad hack, TODO: review
   if not self.playlist then
     self.playlist = { item }
   else
