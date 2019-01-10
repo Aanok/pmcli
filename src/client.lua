@@ -77,7 +77,7 @@ function pmcli.compute_title(item, media_container)
     elseif (item.type == "album" or item.type == "season") and media_container.mixed_parents and item.parent_title then
       -- artist - album / show - season
       return string.format("%s - %s", item.parent_title, item.title)
-    elseif item.type == "track" and media_container.mixed_parents and item.grandparent_title and item.parent_title then
+    elseif item.name == "Track" and media_container.mixed_parents and item.grandparent_title and item.parent_title then
       -- prefix with artist name and album
       return string.format("%s - %s - %s",
                           item.grandparent_title,
@@ -320,7 +320,7 @@ function pmcli.play_video(item)
 	body = nil
 	assert(reply.tag == "MediaContainer" and #reply > 1, "Unexpected reply to API request " .. pmcli.options.base_addr .. item.key)
 	
-	-- sanitize; NB preservers nil
+	-- sanitize; NB preserves nil
 	reply[2].attr.viewOffset = tonumber(reply[2].attr.viewOffset)
 	
 	---- VERSIONS ----
