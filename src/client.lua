@@ -362,29 +362,33 @@ function pmcli.play_video(item)
 			v.attr.duration = tonumber(v.attr.duration)
 		end
 	end
+	-- reverse parts, so offset computation can drop from tail instead of head
+	for i = 1, #parts/2 do
+		local tmp = parts[i]
+		parts[i] = parts[#parts - i + 1]
+		parts[#parts - i + 1] = tmp
+	end
 
 	parts.offset = 0
-	parts.first = 1
-	parts.last = #parts
 	local force_resume = false
 	if reply[2].attr.viewOffset and utils.confirm_yn(item.title .. " is set as partially viewed. Would you like to resume at " .. utils.msecs_to_time(reply[2].attr.viewOffset) .. "?") then
 		force_resume = true
 		-- NB we assume that if the viewOffset wasn't found up to the second-to-last part,
 		-- then it surely is in the last part
-		while parts.first < parts.last and parts.offset + parts[parts.first].attr.duration < reply[2].attr.viewOffset do
-			parts.offset = parts.offset + parts[parts.first].attr.duration
-			parts.first = parts.first + 1
+		while #parts > 1 and parts.offset + parts[#parts].attr.duration < reply[2].attr.viewOffset do
+			parts.offset = parts.offset + parts[#parts].attr.duration
+			parts[#parts] = nil
 		end
-		parts[parts.first].attr.viewOffset = reply[2].attr.viewOffset - parts.offset
+		parts[1].attr.viewOffset = reply[2].attr.viewOffset - parts.offset
 	end
 
 	-- notify user if there are many parts
-	if parts.last > parts.first then
-		io.stdout:write("\n-- Playback will consist of " .. parts.last - parts.first + 1 .. " files which will be played consecutively --\n\n")
+	if #parts > 1 then
+		io.stdout:write("\n-- Playback will consist of " .. #parts .. " files which will be played consecutively --\n\n")
 	end
 
 	---- PLAYBACK ----
-	for i = parts.first, parts.last do
+	for i = #parts, 1, -1 do
 		local stream_item = {
 			title = item.title,
 			duration = reply[2].attr.duration,
@@ -403,7 +407,7 @@ function pmcli.play_video(item)
 
 		-- as we have already prompted for resume, on the first file we will want
 		-- to skip prompting again, if user said yes
-		pmcli.play_media({ stream_item }, force_resume and i == parts.first)
+		pmcli.play_media({ stream_item }, force_resume and i == #parts)
 
 		parts.offset = parts.offset + parts[i].attr.duration
 	end
@@ -693,8 +697,6 @@ function pmcli.init(args)
     _,_,error_code = os.rename(pmcli.session_filename, pmcli.session_filename)
   end
   assert(assert(io.open(pmcli.session_filename, "w"):close()))
-  
-  print(pmcli.session_filename)
   
   pmcli.stream_filename = pmcli.session_filename .. "_stream"
   
