@@ -256,7 +256,7 @@ function pmcli.play_media(playlist, force_resume)
   
   -- wait for mpv to setup the socket
   -- we will persevere for as long as mpv is running
-  pmcli.connect_mpv_socket()
+  pmcli.mpv_socket = socket.connect({ path = pmcli.mpv_socket_name })
   local joined = mpv_thread:join(0.5) -- if things go smooth this is enough
   while not pmcli.mpv_socket:peername() and not joined do
     joined = mpv_thread:join(5.0) -- if there's a problem, we give it a lot of time
@@ -315,9 +315,7 @@ end
 
 function pmcli.play_video(item)
 	-- fetch metadata, small payload for sure so we work in-memory
-	local body = assert(pmcli.plex_request(item.key))
-	local reply = assert(lxp_lom.parse(body))
-	body = nil
+	local reply = assert(lxp_lom.parse(assert(pmcli.plex_request(item.key))))
 	assert(reply.tag == "MediaContainer" and #reply > 1, "Unexpected reply to API request " .. pmcli.options.base_addr .. item.key)
 	
 	-- sanitize; NB preserves nil
@@ -518,11 +516,6 @@ end
 
 
 -- ========== SETUP ==========
-function pmcli.connect_mpv_socket()
-  pmcli.mpv_socket = socket.connect({ path = pmcli.mpv_socket_name })
-end
-
-
 -- command line arguments
 function pmcli.parse_args(args)
   local parsed_args = {}
@@ -559,152 +552,207 @@ end
 
 
 function pmcli.login()
-  local plex_token
-  local unique_identifier = "pmcli-" .. utils.generate_random_id()
-  repeat 
-    io.stdout:write("\nPlease enter your Plex account name or email.\n")
-    local login = utils.read()
-    io.stdout:write("\nPlease enter your Plex account password.\n")
-    local password, errmsg = utils.read_password()
-    if not password then
-      pmcli.quit(errmsg)
-    end
-    plex_token, errmsg = pmcli.request_token(login, password, unique_identifier)
-    if not plex_token then
-      io.stderr:write("[!!] Authentication error: ", errmsg .. "\n")
-      if not utils.confirm_yn("Would you like to try again with new credentials?") then
-        pmcli.quit("Configuration was unsuccessful.")
-      end
-    end
-  until plex_token
-  -- delete password from process memory as soon as possible
-  password = nil
-  collectgarbage()
-  return plex_token, unique_identifier
+	local plex_token
+	local unique_identifier = "pmcli-" .. utils.generate_random_id()
+	repeat 
+		io.stdout:write("\nPlease enter your Plex account name or email.\n")
+		local login = utils.read()
+		io.stdout:write("\nPlease enter your Plex account password.\n")
+		local password, errmsg = utils.read_password()
+		if not password then
+			pmcli.quit(errmsg)
+		end
+	
+		local request = http_request.new_from_uri("https://plex.tv/users/sign_in.xml")
+		request.headers:upsert(":method", "POST")
+		request.headers:append("content-type", "application/x-www-form-urlencoded")
+		request.headers:append("x-plex-client-identifier", unique_identifier)
+		request.headers:append("x-plex-product", "pmcli")
+		request.headers:append("x-plex-version", pmcli.VERSION)
+		request:set_body("user%5blogin%5d=" .. http_encode(login) .. "&user%5bpassword%5d=" .. http_encode(password))
+		local headers, stream = request:go()
+		if not headers then
+			pmcli.quit("Network error on token request: " .. stream)
+		end
+		local reply = lxp_lom.parse(stream:get_body_as_string())
+		if reply[2].tag == "error" then
+			plex_token, errmsg = nil, reply[2][1]
+		else
+			io.stdout:write("\nLogin successful.\n")
+			plex_token = reply.attr.authenticationToken
+		end
+
+		if not plex_token then
+			io.stderr:write("[!!] Authentication error: ", errmsg .. "\n")
+			if not utils.confirm_yn("Would you like to try again with new credentials?") then
+				pmcli.quit("Error during account login.")
+			end
+		end
+	until plex_token
+	-- delete password from process memory as soon as possible
+	collectgarbage()
+	
+	return plex_token, unique_identifier
 end
 
 
 function pmcli.first_time_config(skip_prompt, user_filename)
-  if not skip_prompt and not utils.confirm_yn("\nConfiguration file not found. Would you like to proceed with configuration and login?") then
-    pmcli.quit()
-  end
-  
-  local options = {}
-  
-  local uri_patt = require("lpeg_patterns.uri").uri * -1
-  io.stdout:write("\nPlease enter an address (and port if not default) to access your Plex Media Server.\nIt should look like https://example.com:32400 .\n")
-  repeat
-    options.base_addr = utils.read()
-    if not uri_patt:match(options.base_addr) then
-      io.stderr:write("[!!] Malformed URI. Please try again.\n")
-    end
-  until uri_patt:match(options.base_addr)
-  
-  options.plex_token, options.unique_identifier = pmcli.login()
-  
-  options.require_hostname_validation = not utils.confirm_yn("\nDo you need PMCLI to ignore hostname validation (must e.g. if using builtin SSL certificate)?")
+	if not skip_prompt and not utils.confirm_yn("\nConfiguration file not found. Would you like to proceed with configuration and login?") then
+		pmcli.quit()
+	end
+
+	local options = {}
+
+	---- LOGIN ----
+	options.plex_token, options.unique_identifier = pmcli.login()
+
+	---- SERVER SELECTION ----
+	local reply
+	while not reply do
+		local request = http_request.new_from_uri("https://plex.tv/pms/resources.xml")
+		request.ctx = pmcli.ssl_context
+		request.headers:append("x-plex-client-identifier", options.unique_identifier)
+		request.headers:append("x-plex-product", "pmcli")
+		request.headers:append("x-plex-version", pmcli.VERSION)
+		request.headers:append("x-plex-token", options.plex_token, true)
+		local headers, stream = request:go(10.0) -- 10 secs timeout
+		if not headers then
+			-- timeout or other network error of sorts
+			io.stdout:write("[!!] Network error on API request https://plex.tv/pms/resources.xml:\n" .. stream .. "\n")
+		end
+		if headers:get(":status") == "200" then
+			reply = lxp_lom.parse(stream:get_body_as_string())
+		else
+			io.stdout:write("[!!] API request https://plex.tv/pms/resources.xml returned error " .. headers:get(":status") .. ".\n")
+		end
+		if not reply and not utils.confirm_yn("\nWould you like to try connecting again?") then
+			pmcli.quit("Error during server discovery.")
+		end
+	end
+	
+	local servers = {}
+	for _,d in pairs(reply) do
+		if d.tag == "Device" and d.attr.provides == "server" then
+			for _,c in pairs(d) do
+				if c.tag == "Connection" then
+					servers[#servers + 1] = {
+						name = d.attr.name,
+						addr = c.attr.uri
+					}
+				end
+			end
+		end
+	end
+	
+	io.stdout:write("\nWhich address should PMCLI connect to?\n")
+	for i = 1, #servers do
+		io.stdout:write(i .. ": " .. servers[i].name .. " @ " .. servers[i].addr .. "\n")
+	end
+	io.stdout:write(#servers + 1 .. ": input address by hand\n")
+	local selection = tonumber(utils.read())
+	while not selection or selection < 1 or selection > #servers + 1 do
+		io.stdout:write("[!!] Invalid choice. Please try again.\n")
+		selection = tonumber(utils.read())
+	end
+	
+	if selection == #servers + 1 then  
+		local uri_patt = require("lpeg_patterns.uri").uri * -1
+		io.stdout:write("\nPlease enter an address (and port if not default) to access your Plex Media Server.\nIt should look like https://example.com:32400 .\n")
+		repeat
+			options.base_addr = utils.read()
+			if not uri_patt:match(options.base_addr) then
+				io.stderr:write("[!!] Malformed URI. Please try again.\n")
+			end
+		until uri_patt:match(options.base_addr)
+	else
+		options.base_addr = servers[selection].addr
+	end
+	
+	---- MISC OPTIONS ----
+	options.require_hostname_validation = not utils.confirm_yn("\nDo you need PMCLI to ignore hostname validation (must e.g. if using builtin SSL certificate)?")
   
   return options
 end
 
 
--- token request
-function pmcli.request_token(login, pass, id)
-  local request = http_request.new_from_uri("https://plex.tv/users/sign_in.xml")
-  request.headers:upsert(":method", "POST")
-  request.headers:append("content-type", "application/x-www-form-urlencoded")
-  request.headers:append("x-plex-client-identifier", id)
-  request.headers:append("x-plex-product", "pmcli")
-  request.headers:append("x-plex-version", pmcli.VERSION)
-  request:set_body("user%5blogin%5d=" .. http_encode(login) .. "&user%5bpassword%5d=" .. http_encode(pass))
-  local headers, stream = request:go()
-  if not headers then
-    pmcli.quit("Network error on token request: " .. stream)
-  end
-  local reply = lxp_lom.parse(stream:get_body_as_string())
-  if reply[2].tag == "error" then
-    return nil, reply[2][1] -- error msg
-  else
-    return reply.attr.authentication_token
-  end
-end
-
-
 -- inizialize
 function pmcli.init(args)
-  io.stdout:write("Plex Media CLIent v" ..  pmcli.VERSION .. "\n")
-  
-  -- first, read CLI arguments
-  local parsed_args = pmcli.parse_args(args)
-  
-  -- setup options from config file
-  -- or, alternatively, ask user and login
-  local must_save_config = false
-  local error_message, error_code
-  pmcli.options, error_message, error_code = utils.get_config(parsed_args.config_filename)
-  if not pmcli.options and error_code == 2 then
-    -- config file not found
-    -- if --login was passed, skip confirmation prompt
-    pmcli.options = pmcli.first_time_config(parsed_args.login, parsed_args.config_filename)
-    must_save_config = true
-  elseif not pmcli.options and error_code ~= 2 then
-    -- real error
-    pmcli.quit("Error opening configuration file:\n" .. error_message)
-  end
-  -- pmcli.options is valid from here onwards
-  
-  if not pmcli.options.pmcli_version or pmcli.options.pmcli_version ~= pmcli.VERSION then
-    io.stdout:write("Check the changelog at https://github.com/Aanok/pmcli/blob/master/Changelog.md\n")
-    pmcli.options.pmcli_version = pmcli.VERSION
-    must_save_config = true
-  end
-  
-  if parsed_args.login then
-    -- config file found but user wants to redo login
-    io.stdout:write("Attempting new login to obtain a new token.\n")
-    pmcli.options.plex_token, pmcli.options.unique_identifier = pmcli.login()
-    must_save_config = true
-  end
-  
-  if must_save_config then
-    io.stdout:write("Committing configuration to disk...\n")
-    local ok, error_message, error_code = utils.write_config(pmcli.options, parsed_args.config_filename)
-    if not ok and error_code == -2 then
-      io.stderr:write(error_message .. "\n")
-    elseif not ok and error_code ~= -2 then
-      pmcli.quit("Error writing configuration file:\n" .. error_message)
-    end
-  end
-  
-  -- if we need to step around mismatched hostnames from the certificate
-  local http_tls = require("http.tls")
-  http_tls.has_hostname_validation = pmcli.options.require_hostname_validation
-  pmcli.ssl_context = http_tls.new_client_context()
-  
-  -- if we need to skip certificate validation
-  if not pmcli.options.verify_server_certificates then
-    pmcli.ssl_context:setVerify(require("openssl.ssl.context").VERIFY_NONE)
-  end
-  
-  
-  -- temp files
-  assert(os.execute("mkdir -p -m 700 /tmp/pmcli"))
-  pmcli.session_filename = "/tmp/pmcli/" .. utils.generate_random_id(10)
-  -- overkill: ensure session id isn't already taken for some reason
-  _,_,error_code = os.rename(pmcli.session_filename, pmcli.session_filename)
-  while error_code ~= 2 do -- until "no such file"
-    pmcli.session_filename = "/tmp/pmcli/" .. utils.generate_random_id(10)
-    _,_,error_code = os.rename(pmcli.session_filename, pmcli.session_filename)
-  end
-  assert(assert(io.open(pmcli.session_filename, "w"):close()))
-  
-  pmcli.stream_filename = pmcli.session_filename .. "_stream"
-  
-  pmcli.mpv_socket_name = pmcli.session_filename .. "_socket"
-  socket.settimeout(10.0) -- new default
-  
-  pmcli.sax = require("pmcli.sax")
-  pmcli.sax.init(pmcli.session_filename .. "_header", pmcli.session_filename .. "_body", pmcli.stream_filename)
+	io.stdout:write("Plex Media CLIent v" ..  pmcli.VERSION .. "\n")
+
+	-- first, read CLI arguments
+	local parsed_args = pmcli.parse_args(args)
+
+	-- setup options from config file
+	-- or, alternatively, ask user and login
+	local must_save_config = false
+	local error_message, error_code
+	pmcli.options, error_message, error_code = utils.get_config(parsed_args.config_filename)
+	if not pmcli.options and error_code == 2 then
+		-- config file not found
+		-- if --login was passed, skip confirmation prompt
+		pmcli.options = pmcli.first_time_config(parsed_args.login, parsed_args.config_filename)
+		parsed_args.login = nil
+		must_save_config = true
+		io.stdout:write("\n")
+	elseif not pmcli.options and error_code ~= 2 then
+		-- real error
+		pmcli.quit("Error opening configuration file:\n" .. error_message)
+	end
+	-- pmcli.options is valid from here onwards
+
+	if error_code == nil and (not pmcli.options.pmcli_version or pmcli.options.pmcli_version ~= pmcli.VERSION) then
+		-- update, possibly from old version still not tracking version number
+		io.stdout:write("Check the changelog at https://github.com/Aanok/pmcli/blob/master/Changelog.md\n")
+		pmcli.options.pmcli_version = pmcli.VERSION
+		must_save_config = true
+	end
+
+	if parsed_args.login then
+		-- config file found but user wants to redo login
+		io.stdout:write("Attempting new login to obtain a new token.\n\n")
+		pmcli.options.plex_token, pmcli.options.unique_identifier = pmcli.login()
+		must_save_config = true
+	end
+
+	if must_save_config then
+		io.stdout:write("Committing configuration to disk...\n")
+		local ok, error_message, error_code = utils.write_config(pmcli.options, parsed_args.config_filename)
+		if not ok and error_code == -2 then
+			io.stderr:write(error_message .. "\n")
+		elseif not ok and error_code ~= -2 then
+			pmcli.quit("Error writing configuration file:\n" .. error_message)
+		end
+	end
+
+	-- if we need to step around mismatched hostnames from the certificate
+	local http_tls = require("http.tls")
+	http_tls.has_hostname_validation = pmcli.options.require_hostname_validation
+	pmcli.ssl_context = http_tls.new_client_context()
+
+	-- if we need to skip certificate validation
+	if not pmcli.options.verify_server_certificates then
+		pmcli.ssl_context:setVerify(require("openssl.ssl.context").VERIFY_NONE)
+	end
+
+
+	-- temp files
+	assert(os.execute("mkdir -p -m 700 /tmp/pmcli"))
+	pmcli.session_filename = "/tmp/pmcli/" .. utils.generate_random_id(10)
+	-- overkill: ensure session id isn't already taken for some reason
+	_,_,error_code = os.rename(pmcli.session_filename, pmcli.session_filename)
+	while error_code ~= 2 do -- until "no such file"
+		pmcli.session_filename = "/tmp/pmcli/" .. utils.generate_random_id(10)
+		_,_,error_code = os.rename(pmcli.session_filename, pmcli.session_filename)
+	end
+	assert(assert(io.open(pmcli.session_filename, "w"):close()))
+
+	pmcli.stream_filename = pmcli.session_filename .. "_stream"
+
+	pmcli.mpv_socket_name = pmcli.session_filename .. "_socket"
+	socket.settimeout(10.0) -- new default
+
+	pmcli.sax = require("pmcli.sax")
+	pmcli.sax.init(pmcli.session_filename .. "_header", pmcli.session_filename .. "_body", pmcli.stream_filename)
 end
 -- ===========================
 
