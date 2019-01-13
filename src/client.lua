@@ -19,10 +19,10 @@ local pmcli = {
 
 === Plex Server ===
 0. quit
-L 1. Library Sections
-L 2. Recently Added Content
-L 3. On Deck Content
-L 4. Playlists
+D 1. Library Sections
+D 2. Recently Added Content
+D 3. On Deck Content
+D 4. Playlists
 ]]
 }
 
@@ -450,10 +450,10 @@ function pmcli.print_menu(context)
 		local tag
 		if item.search == "1" then
 			tag = "?"
-		elseif item.type == nil then
+		elseif item.name == "Directory" or item.name == "Playlist" then
 			tag = "D"
 		else
-			tag = item.type:sub(1,1):upper()
+			tag = item.name:sub(1,1)
 		end
 		io.stdout:write(tag .. " " .. i .. ": " .. pmcli.compute_title(item, mc) .. "\n")
 		i = i + 1

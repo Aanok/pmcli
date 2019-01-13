@@ -1,7 +1,7 @@
 --[[
-after TAG NAME and TYPE (optional! only when needed to disambiguate),
+after TAG NAME, TYPE (optional! only if needed to disambiguate)
 fields are listed by tree pre-visit, then alphabetically
-in short: NAME, TYPE, then alphabetically, then filename and part key
+in short: NAME, maybe TYPE, then alphabetically, then filename and part key
 
 === HEADER STRUCTURE ===
 (NB offsets are saved as fixed-length binary reps by string.pack)
@@ -17,7 +17,6 @@ mc.title2
 === DIRECTORY ===
 (for By Folder view these will only have Title and Key fields!)
 (this will also cover Playlist items)
-NAME
 TYPE
 index
 key
