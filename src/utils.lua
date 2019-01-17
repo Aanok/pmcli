@@ -287,6 +287,7 @@ function utils.get_config(user_filename)
     require_hostname_validation = true,
     verify_server_certificates = true,
     unique_identifier = "pmcli-dummy",
+    request_timeout = 10.0
   }
     
   -- open file

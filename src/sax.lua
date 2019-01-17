@@ -215,7 +215,7 @@ function sax.parse()
 	})
 	for line in io.lines(sax.stream_filename) do
 		local ok, msg, line, col, pos = sax.parser:parse(line)
-		if not ok then return nil, msg, line, col, pos end
+		if not ok then return nil, string.format("%s at line %d, column %d, position %d", msg, line, col, pos) end
 	end
 	sax.parser:close()
 	return true

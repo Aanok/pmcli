@@ -1,7 +1,7 @@
 -- module
 -- we init some "static" values
 local pmcli = {
-  VERSION = "0.1.4",
+  VERSION = "0.2",
   HELP_TEXT = [[Usage:
   pmcli [ --login ] [ --config configuration_file ]
   pmcli [ --help ] ]],
@@ -53,7 +53,7 @@ function pmcli.plex_request(suffix, to_file, base_addr)
 	if pmcli.options.plex_token then
 		request.headers:append("x-plex-token", pmcli.options.plex_token, true)
 	end
-	local headers, stream = request:go(10.0) -- 10 secs timeout
+	local headers, stream = request:go(pmcli.options.request_timeout) -- 10 secs timeout
 	if not headers then
 		-- timeout or other network error of sorts
 		return nil, "Network error on API request " .. base_addr .. suffix .. ":\n" .. stream
@@ -165,6 +165,9 @@ function pmcli.play_media(playlist, force_resume)
 	local mpv_args = "--input-ipc-server=" .. pmcli.mpv_socket_name
 	if pmcli.options.plex_token then
 		mpv_args = mpv_args .. " --http-header-fields='x-plex-token: " .. pmcli.options.plex_token .. "'"
+	end
+	if pmcli.options.mpv_profile then
+		mpv_args = mpv_args .. " --profile='" .. pmcli.options.mpv_profile .."'"
 	end
 	mpv_args = mpv_args .. " --title='" .. utils.escape_quote(playlist[1].title) .. "'"
 
@@ -454,7 +457,7 @@ end
 function pmcli.open_menu(context)
 	while true do
 		assert(pmcli.plex_request(context, true))
-		assert(pmcli.sax.parse(), "XML parsing error for request " .. pmcli.options.base_addr .. context .. "\n")
+		assert(pmcli.sax.parse(), "XML parsing error for request " .. pmcli.options.base_addr .. context)
 		pmcli.print_menu(context)
 		for _,c in ipairs(utils.read_commands()) do
 			if c == "q" then
@@ -740,6 +743,9 @@ function pmcli.init(arg)
 	if not pmcli.options.verify_server_certificates then
 		pmcli.ssl_context:setVerify(require("openssl.ssl.context").VERIFY_NONE)
 	end
+	
+	-- sanitize
+	pmcli.options.request_timeout = tonumber(pmcli.options.request_timeout)
 
 
 	---- TEMP FILES ----

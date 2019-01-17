@@ -1,11 +1,13 @@
 # 0.2
-2019/1/??
+2019/1/17
 
 - Rewrote parsing logic to be faster and use a fixed amount of RAM by streaming to/from disk
-- Swapped dkjson for luaexpat. dkjson source file is included repo in order to talk to mpv's socket
+- Swapped dkjson for luaexpat. dkjson source file is included in repo in order to talk to mpv's socket
+- Added `request_timeout` config value for HTTP(S) requests to Plex server. 10 seconds default
+- Added `mpv_profile` config value to make mpv run under a specific profile
 - Added server discovery during interactive config (the endpoint returns XML only, hence expat instead of lunajson)
 - Added tokenless operation if host is on server whitelist: set `plex_token = ` (empty) or delete the whole line in your config file
-- Tidied up temp files
+- Temp files now reside in `/tmp/pmcli`
 - Fixed a bug where passing --login on an empty config file prompted login twice
 - Fixed a bug where menu navigation would work but playback failed when using an invalid token on a whitelisted host
 - Some code refactoring
