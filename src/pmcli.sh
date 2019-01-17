@@ -1,3 +1,1 @@
-local client = require("pmcli.client")
-client.start(arg)
-
+require("pmcli.client").start(arg)
