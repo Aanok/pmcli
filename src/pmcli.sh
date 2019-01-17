@@ -1,3 +1,3 @@
 local client = require("pmcli.client")
-client.init(arg)
-client.run()
+client.start(arg)
+

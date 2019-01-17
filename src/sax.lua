@@ -20,7 +20,6 @@ mc.title2
 TYPE
 index
 key
-mixedParents
 parentTitle
 search
 title
@@ -31,7 +30,6 @@ NAME
 (no TYPE)
 duration
 grandparentTitle
-mixedParents
 parentTitle
 ratingKey
 title
@@ -55,7 +53,6 @@ TYPE
 grandparentTitle
 index
 key
-mixedParents
 parentIndex
 title
 FILE -- from ->Media->Part
@@ -75,7 +72,6 @@ function sax.directory_start(parser, name, attributes)
 	sax.body:write((attributes.type or "") .. "\n")
 	sax.body:write((attributes.index or "") .. "\n")
 	sax.body:write((attributes.key or "") .. "\n")
-	sax.body:write((attributes.mixedParents or "") .. "\n")
 	sax.body:write((attributes.parentTitle or "") .. "\n")
 	sax.body:write((attributes.search or "") .. "\n")
 	sax.body:write((attributes.title or "") .. "\n")
@@ -96,7 +92,6 @@ function sax.track_start(parser, name, attributes)
 	sax.body:write(name .. "\n")
 	sax.body:write((attributes.duration or "") .. "\n")
 	sax.body:write((attributes.grandparentTitle or "") .. "\n")
-	sax.body:write((attributes.mixedParents or "") .. "\n")
 	sax.body:write((attributes.parentTitle or "") .. "\n")
 	sax.body:write((attributes.ratingKey or "") .. "\n")
 	sax.body:write((attributes.title or "") .. "\n")
@@ -127,7 +122,6 @@ function sax.episode_start(parser, name, attributes)
 	sax.body:write((attributes.grandparentTitle or "") .. "\n")
 	sax.body:write((attributes.index or "") .. "\n")
 	sax.body:write((attributes.key or "") .. "\n")
-	sax.body:write((attributes.mixedParents or "") .. "\n")
 	sax.body:write((attributes.parentIndex or "") .. "\n")
 	sax.body:write((attributes.title or "") .. "\n")
 	
@@ -251,14 +245,12 @@ function sax.get_current()
 		el.type = sax.body:read()
 		el.index = tonumber(sax.body:read())
 		el.key = sax.body:read()
-		el.mixed_parents = sax.body:read()
 		el.parent_title = sax.body:read()
 		el.search = sax.body:read()
 		el.title = sax.body:read()
 	elseif el.name == "Track" then
 		el.duration = tonumber(sax.body:read())
 		el.grandparent_title = sax.body:read()
-		el.mixed_parents = sax.body:read()
 		el.parent_title = sax.body:read()
 		el.rating_key = sax.body:read()
 		el.title = sax.body:read()
@@ -276,7 +268,6 @@ function sax.get_current()
 			el.grandparent_title = sax.body:read()
 			el.index = sax.body:read()
 			el.key = sax.body:read()
-			el.mixed_parents = sax.body:read()
 			el.parent_index = sax.body:read()
 			el.title = sax.body:read()
 			el.file = sax.body:read()

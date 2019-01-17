@@ -63,8 +63,8 @@ end
 -- ========== MISCELLANEOUS ==========
 -- save stty state as we found it
 function utils.save_stty()
-  f = assert(io.popen("stty --save", "r"))
-  s = assert(f:read())
+  local f = assert(io.popen("stty --save", "r"))
+  local s = assert(f:read())
   assert(f:close())
   return s
 end
@@ -286,7 +286,7 @@ function utils.get_config(user_filename)
   local options = {
     require_hostname_validation = true,
     verify_server_certificates = true,
-    unique_identifier = "pmcli-dummy"
+    unique_identifier = "pmcli-dummy",
   }
     
   -- open file
@@ -302,7 +302,7 @@ function utils.get_config(user_filename)
   -- parse file
   for line in file:lines() do
     local key, value = utils.parse_config_line(line)
-    if key ~= nil and value ~= nil then options[key] = value end
+    if key ~= nil then options[key] = value end
   end
 
   file:close()  

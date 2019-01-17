@@ -5,13 +5,6 @@ local pmcli = {
   HELP_TEXT = [[Usage:
   pmcli [ --login ] [ --config configuration_file ]
   pmcli [ --help ] ]],
-  AMBIGUOUS_CONTEXTS = {
-    ["On Deck"] = true,
-    ["Recently Added"] = true,
-    ["Recently Aired"] = true,
-    ["Recently Viewed Episodes"] = true,
-    ["Playlist"] = true
-  },
   IPC = {
     GET_PLAYBACK_TIME = '{ "command": ["get_property", "playback-time"], "request_id": 1 }\n'
   },
@@ -49,77 +42,21 @@ local http_encode = require("http.util").encodeURIComponent
 -- ==============================
 
 
--- ========== CONVENIENCIES ==========
-function pmcli.compute_title(item, media_container)
-  if item.title then
-    -- title field is filled, use it
-    -- this should mean there is, generally speaking, available metadata
-    if item.type == "episode" then
-      -- for tv shows we want to show information on show title, season and episode number
-      if pmcli.AMBIGUOUS_CONTEXTS[media_container.title2] and item.grandparent_title and item.index and item.parent_index then
-        -- menus where there is a jumble of shows and episodes, so we must show everything
-        return string.format("%s S%02dE%02d - %s",
-                            item.grandparent_title,
-                            item.parent_index,
-                            item.index,
-                            item.title)
-      elseif media_container.mixed_parents and item.index and item.parent_index then
-        -- mixedParents marks a generic promiscuous context, but we ruled out cases where shows are mixed
-        -- so we only need season and episode
-        return string.format("S%02dE%02d - %s", item.parent_index, item.index, item.title)
-      elseif item.index then
-        -- here we should be in a specific season, so we only need the episode
-        return string.format("E%02d - %s", item.index, item.title)
-      end
-    elseif item.type == "movie" and item.year then
-      -- add year
-      return string.format("%s (%d)", item.title, item.year)
-    elseif (item.type == "album" or item.type == "season") and media_container.mixed_parents and item.parent_title then
-      -- artist - album / show - season
-      return string.format("%s - %s", item.parent_title, item.title)
-    elseif item.name == "Track" and media_container.mixed_parents and item.grandparent_title and item.parent_title then
-      -- prefix with artist name and album
-      return string.format("%s - %s - %s",
-                          item.grandparent_title,
-                          item.parent_title,
-                          item.title)
-    end
-    -- no need for or availability of further information
-    return item.title
-  elseif item.file then
-    -- infer title from corresponding filename, like POSIX basename util
-    return string.match(item.file, ".*/(.*)%..*")
-  end
-  -- either malformed item table or no media file to infer from
-  return "Unknown title"
-end
--- ===================================
-
-
--- ========== MEMBERS ==========
-function pmcli.quit(error_message)
-  if pmcli.mpv_socket_name then os.remove(pmcli.mpv_socket_name) end
-  if pmcli.sax then pmcli.sax.destroy() end
-  if pmcli.stream_filename then os.remove(pmcli.stream_filename) end
-  if pmcli.session_filename then os.remove(pmcli.session_filename) end
-  os.execute("stty " .. utils.stty_save) -- in case of fatal errors while mpv is running
-  if error_message then
-    io.stderr:write("[!!!] " .. error_message ..  "\n")
-    os.exit(1)
-  else
-    os.exit(0)
-  end
-end
-
-
-function pmcli.plex_request(suffix, to_file)
-	local request = http_request.new_from_uri(pmcli.options.base_addr ..  suffix)
+-- ========== NETWORK ==========
+function pmcli.plex_request(suffix, to_file, base_addr)
+	local base_addr = base_addr or pmcli.options.base_addr
+	local request = http_request.new_from_uri(base_addr ..  suffix)
 	request.ctx = pmcli.ssl_context
-	pmcli.setup_headers(request.headers)
+	request.headers:append("x-plex-client-identifier", pmcli.options.unique_identifier)
+	request.headers:append("x-plex-product", "pmcli")
+	request.headers:append("x-plex-version", pmcli.VERSION)
+	if pmcli.options.plex_token then
+		request.headers:append("x-plex-token", pmcli.options.plex_token, true)
+	end
 	local headers, stream = request:go(10.0) -- 10 secs timeout
 	if not headers then
 		-- timeout or other network error of sorts
-		return nil, "Network error on API request " .. pmcli.options.base_addr .. suffix .. ":\n" .. stream
+		return nil, "Network error on API request " .. base_addr .. suffix .. ":\n" .. stream
 	end
 	if headers:get(":status") == "200" then
 		if to_file then
@@ -131,185 +68,159 @@ function pmcli.plex_request(suffix, to_file)
 			return stream:get_body_as_string()
 		end
 	elseif headers:get(":status") == "401" then
-		return nil, "API request " .. pmcli.options.base_addr .. suffix .. " returned error 401: unauthorized.\nYour token may have expired, consider logging in again by passing --login."
+		return nil,
+		"API request " .. base_addr .. suffix .. " returned error 401: unauthorized.\nYour token was rejected, consider logging in again by passing --login.",
+		headers:get(":status")
 	else
-		return nil, "API request " .. pmcli.options.base_addr .. suffix .. " returned error " .. headers:get(":status") .. "."
+		return nil,
+		"API request " .. base_addr .. suffix .. " returned error " .. headers:get(":status") .. ".",
+		headers:get(":status")
 	end
 end
 
 
 function pmcli.sync_progress(item, msecs)
-  if item.duration and item.rating_key then
-  -- rating_key should always be there tbh, but duration might actually be missing if
-  -- a metadata update is in progress or such
-    if not item.last_sync or math.abs(item.last_sync - msecs) > 10000 then
-    -- there is actual progress to update
-      local total_msecs = item.offset_to_part + msecs
-      if total_msecs > item.duration * 0.95 then -- close enough to end, scrobble
-        local ok, error_msg = pmcli.plex_request("/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library")
-        if not ok then
-          io.stderr:write("[!] " .. error_msg .. "\n")
-        else
-          item.last_sync = nil
-        end
-      elseif total_msecs > item.duration * 0.05 then -- far enough from start, update viewOffset
-        local ok, error_msg = pmcli.plex_request("/:/progress?key=" .. item.rating_key .. "&time=" .. total_msecs .. "&identifier=com.plexapp.plugins.library")
-        if not ok then
-          io.stderr:write("[!] " .. error_msg .. "\n")
-        else
-          item.last_sync = msecs
-        end
-      end
-    end
-  end
-  return item
+	if item.duration and item.rating_key then
+		-- rating_key should always be there tbh, but duration might actually be missing if
+		-- a metadata update is in progress or such
+		if not item.last_sync or math.abs(item.last_sync - msecs) > 10000 then
+			-- there is actual progress to update
+			local total_msecs = item.offset_to_part + msecs
+			if total_msecs > item.duration * 0.95 then -- close enough to end, scrobble
+				local ok, error_msg = pmcli.plex_request("/:/scrobble?key=" .. item.rating_key .. "&identifier=com.plexapp.plugins.library")
+				if not ok then
+					io.stderr:write("[!] " .. error_msg .. "\n")
+				else
+					item.last_sync = nil
+				end
+			elseif total_msecs > item.duration * 0.05 then -- far enough from start, update viewOffset
+				local ok, error_msg = pmcli.plex_request("/:/progress?key=" .. item.rating_key .. "&time=" .. total_msecs .. "&identifier=com.plexapp.plugins.library")
+				if not ok then
+					io.stderr:write("[!] " .. error_msg .. "\n")
+				else
+					item.last_sync = msecs
+				end
+			end
+		end
+	end
+	return item
 end
+-- =============================
 
 
+-- ========== PLAYBACK ==========
 function pmcli.mpv_socket_handle(playlist)
-  local pos = 1
-  local must_ask_offset = false
-  local msg, err
-  
-  repeat
-    msg, err = pmcli.mpv_socket:read()
-    if msg == nil and err == 110 then
-      -- timeout
-      pmcli.mpv_socket:clearerr()
-      pmcli.mpv_socket:write(pmcli.IPC.GET_PLAYBACK_TIME)
-    elseif msg then
-      local decoded = json.decode(msg)
-      if decoded.event == "property-change" and decoded.id == 1 then
-        -- playlist-pos-1
-        pos = decoded.data
-        if pos ~= 1 and playlist[pos].view_offset then
-          -- there is a bookmark, so we must prompt the user about it
-          -- but note: the first item's already been taken care of
-          -- mpv's term-playing-msg, tracks and tags will be shown before the prompt
-          pmcli.mpv_socket:write('{ "command": ["set_property", "pause", true] }\n')
-          must_ask_offset = true
-        end
-      elseif must_ask_offset and decoded.event == "pause" then
-        -- mpv has written its header and is about to print term-status-msg
-        -- which we don't want because it will interleave and overlap with our I/O
-        -- so we disable mpv's terminal functionalities altogether (in,err,out)
-        pmcli.mpv_socket:write('{ "command": ["set_property", "terminal", false] }\n')
-        local offset_time = utils.msecs_to_time(playlist[pos].view_offset)
-        -- mpv disables tty echo and maybe other functionalities
-        local mpv_stty = utils.save_stty()
-        os.execute("stty " .. utils.stty_save)
-        if utils.confirm_yn("\n" .. playlist[pos].title .. " is set as partially viewed. Would you like to resume at " .. offset_time .. "?") then
-          pmcli.mpv_socket:write(string.format('{ "command": ["seek", "%s"] }\n', offset_time))
-        end
-        io.stdout:write("\n")
-        os.execute("stty " .. mpv_stty)
-        must_ask_offset = false
-        pmcli.mpv_socket:write('{ "command": ["set_property", "terminal", true] }\n')
-        pmcli.mpv_socket:write('{ "command": ["set_property", "pause", false] }\n')
-      elseif decoded.event == "seek" then
-        pmcli.mpv_socket:write(pmcli.IPC.GET_PLAYBACK_TIME)
-      elseif decoded.request_id == 1 and decoded.error == "success" then
-        -- good reply to playback-time request
-        item = pmcli.sync_progress(playlist[pos], math.floor(decoded.data*1000))
-      end
-    end
-  until msg == nil and err ~= 110
-  return pmcli.mpv_socket:eof(), err
+	local pos = 1
+	local must_ask_offset = false
+	local msg, err
+
+	repeat
+		msg, err = pmcli.mpv_socket:read()
+		if msg == nil and err == 110 then
+			-- timeout
+			pmcli.mpv_socket:clearerr()
+			pmcli.mpv_socket:write(pmcli.IPC.GET_PLAYBACK_TIME)
+		elseif msg then
+			local decoded = json.decode(msg)
+			if decoded.event == "property-change" and decoded.id == 1 then
+				-- playlist-pos-1
+				pos = decoded.data
+				if pos ~= 1 and playlist[pos].view_offset then
+					-- there is a bookmark, so we must prompt the user about it
+					-- but note: the first item's already been taken care of
+					-- mpv's term-playing-msg, tracks and tags will be shown before the prompt
+					pmcli.mpv_socket:write('{ "command": ["set_property", "pause", true] }\n')
+					must_ask_offset = true
+				end
+			elseif must_ask_offset and decoded.event == "pause" then
+				-- mpv has written its header and is about to print term-status-msg
+				-- which we don't want because it will interleave and overlap with our I/O
+				-- so we disable mpv's terminal functionalities altogether (in,err,out)
+				pmcli.mpv_socket:write('{ "command": ["set_property", "terminal", false] }\n')
+				local offset_time = utils.msecs_to_time(playlist[pos].view_offset)
+				-- mpv disables tty echo and maybe other functionalities
+				local mpv_stty = utils.save_stty()
+				os.execute("stty " .. utils.stty_save)
+				if utils.confirm_yn("\n" .. playlist[pos].title .. " is set as partially viewed. Would you like to resume at " .. offset_time .. "?") then
+					pmcli.mpv_socket:write(string.format('{ "command": ["seek", "%s"] }\n', offset_time))
+				end
+				io.stdout:write("\n")
+				os.execute("stty " .. mpv_stty)
+				must_ask_offset = false
+				pmcli.mpv_socket:write('{ "command": ["set_property", "terminal", true] }\n')
+				pmcli.mpv_socket:write('{ "command": ["set_property", "pause", false] }\n')
+			elseif decoded.event == "seek" then
+				pmcli.mpv_socket:write(pmcli.IPC.GET_PLAYBACK_TIME)
+			elseif decoded.request_id == 1 and decoded.error == "success" then
+				-- good reply to playback-time request
+				item = pmcli.sync_progress(playlist[pos], math.floor(decoded.data*1000))
+			end
+		end
+	until msg == nil and err ~= 110
+	return pmcli.mpv_socket:eof(), err
 end
 
 
 function pmcli.play_media(playlist, force_resume)
-  local mpv_args = "--input-ipc-server=" .. pmcli.mpv_socket_name  
-  mpv_args = mpv_args .. " --http-header-fields='x-plex-token: " .. pmcli.options.plex_token .. "'"
-  mpv_args = mpv_args .. " --title='" .. utils.escape_quote(playlist[1].title) .. "'"
-  
-  -- bookmark
-  if playlist[1].view_offset and (force_resume or utils.confirm_yn(playlist[1].title .. " is set as partially viewed. Would you like to resume at " .. utils.msecs_to_time(playlist[1].view_offset) .. "?")) then
-    mpv_args = mpv_args .. " --start=" .. utils.msecs_to_time(playlist[1].view_offset)
-  end
-  
-  -- subs for video
-  if playlist[1].subs then
-    for _,s in ipairs(playlist[1].subs) do
-      mpv_args = mpv_args .. " --sub-file=" .. s
-    end
-  end
-  
-  -- parts
-  for _,item in ipairs(playlist) do
-    mpv_args = mpv_args .. " " .. pmcli.options.base_addr .. item.part_key
-  end
-  
-  -- notify user if running a playlist
-  if #playlist > 1 then
-    io.stdout:write("\n-- " .. #playlist .. " tracks have been gathered in an mpv playlist --\n\n")
-  end
-  
-  -- run mpv SYNCHRONOUSLY in its own thread
-  local mpv_thread = thread.start(function(con, mpv_args)
-    -- signals are blocked by default in new threads, so we unblock SIGINT
-    -- note that the main thread does not receive signals anymore as well
-    local signal = require("cqueues.signal")
-    signal.unblock(signal.SIGINT)
-    os.execute("mpv " .. mpv_args)
-  end, mpv_args)
-  
-  -- wait for mpv to setup the socket
-  -- we will persevere for as long as mpv is running
-  pmcli.mpv_socket = socket.connect({ path = pmcli.mpv_socket_name })
-  local joined = mpv_thread:join(0.5) -- if things go smooth this is enough
-  while not pmcli.mpv_socket:peername() and not joined do
-    joined = mpv_thread:join(5.0) -- if there's a problem, we give it a lot of time
-  end
-  
-  if joined then
-    io.stderr:write("[!] Couldn't reach IPC socket, playback progress was not synced to Plex server.\n")
-  else
-    -- request tracking for playlist's sake
-    pmcli.mpv_socket:write('{ "command": ["observe_property", 1, "playlist-pos-1"] }\n')
-    local ok, err = pmcli.mpv_socket_handle(playlist)
-    if not ok then
-      io.stderr:write("[!] IPC socket error: " .. require("cqueues.errno").strerror(err) ..". Playback sync halted.\n" )
-      -- TODO: improve this
-    end
-  end
-
-  -- innocuous if already joined
-  mpv_thread:join()
-end
-
-
-function pmcli.playlist_enqueue(item)
-  item.offset_to_part = 0 -- bad hack, TODO: review
-  if not pmcli.playlist then
-    pmcli.playlist = { item }
-  else
-    pmcli.playlist[#pmcli.playlist + 1] = item
-  end
-end
-
-
-function pmcli.playlist_try_play_all()
-  if pmcli.playlist then
-    pmcli.play_media(pmcli.playlist)
-    pmcli.playlist = nil
-  end
-end
-
-
-function pmcli.open_item(item, context)
-	if item.search == "1" then
-		pmcli.playlist_try_play_all()
-		pmcli.local_search(item, context)
-	elseif item.name == "Directory" or item.name == "Playlist" then
-		pmcli.playlist_try_play_all()
-		pmcli.open_menu(utils.join_keys(context, item.key))
-	elseif item.name == "Track" then
-		pmcli.playlist_enqueue(item)
-	elseif item.name == "Video" then
-		pmcli.playlist_try_play_all()
-		pmcli.play_video(item)
+	local mpv_args = "--input-ipc-server=" .. pmcli.mpv_socket_name
+	if pmcli.options.plex_token then
+		mpv_args = mpv_args .. " --http-header-fields='x-plex-token: " .. pmcli.options.plex_token .. "'"
 	end
+	mpv_args = mpv_args .. " --title='" .. utils.escape_quote(playlist[1].title) .. "'"
+
+	-- bookmark
+	if playlist[1].view_offset and (force_resume or utils.confirm_yn(playlist[1].title .. " is set as partially viewed. Would you like to resume at " .. utils.msecs_to_time(playlist[1].view_offset) .. "?")) then
+		mpv_args = mpv_args .. " --start=" .. utils.msecs_to_time(playlist[1].view_offset)
+	end
+
+	-- subs for video
+	if playlist[1].subs then
+		for _,s in ipairs(playlist[1].subs) do
+			mpv_args = mpv_args .. " --sub-file=" .. s
+		end
+	end
+
+	-- parts
+	for _,item in ipairs(playlist) do
+		mpv_args = mpv_args .. " " .. pmcli.options.base_addr .. item.part_key
+	end
+
+	-- notify user if running a playlist
+	if #playlist > 1 then
+		io.stdout:write("\n-- " .. #playlist .. " tracks have been gathered in an mpv playlist --\n\n")
+	end
+
+	-- run mpv SYNCHRONOUSLY in its own thread
+	local mpv_thread = thread.start(function(con, mpv_args)
+		-- signals are blocked by default in new threads, so we unblock SIGINT
+		-- note that the main thread does not receive signals anymore as well
+		local signal = require("cqueues.signal")
+		signal.unblock(signal.SIGINT)
+		os.execute("mpv " .. mpv_args)
+	end, mpv_args)
+
+	-- wait for mpv to setup the socket
+	-- we will persevere for as long as mpv is running
+	pmcli.mpv_socket = socket.connect({ path = pmcli.mpv_socket_name })
+	local joined = mpv_thread:join(0.5) -- if things go smooth this is enough
+	while not pmcli.mpv_socket:peername() and not joined do
+		joined = mpv_thread:join(5.0) -- if there's a problem, we give it a lot of time
+	end
+
+	if joined then
+		io.stderr:write("[!] Couldn't reach IPC socket, playback progress was not synced to Plex server.\n")
+	else
+		-- request tracking for playlist's sake
+		pmcli.mpv_socket:write('{ "command": ["observe_property", 1, "playlist-pos-1"] }\n')
+		local ok, err = pmcli.mpv_socket_handle(playlist)
+		if not ok then
+			io.stderr:write("[!] IPC socket error: " .. require("cqueues.errno").strerror(err) ..". Playback sync halted.\n" )
+			-- TODO: improve this
+		end
+	end
+
+	-- innocuous if already joined
+	mpv_thread:join()
 end
 
 
@@ -412,6 +323,42 @@ function pmcli.play_video(item)
 end
 
 
+function pmcli.playlist_enqueue(item)
+	item.offset_to_part = 0 -- bad hack, TODO: review
+	if not pmcli.playlist then
+		pmcli.playlist = { item }
+	else
+		pmcli.playlist[#pmcli.playlist + 1] = item
+	end
+end
+
+
+function pmcli.playlist_try_play_all()
+	if pmcli.playlist then
+		pmcli.play_media(pmcli.playlist)
+		pmcli.playlist = nil
+	end
+end
+-- ==============================
+
+
+-- ========== INTERFACE ==========
+function pmcli.open_item(item, context)
+	if item.search == "1" then
+		pmcli.playlist_try_play_all()
+		pmcli.local_search(item, context)
+	elseif item.name == "Directory" or item.name == "Playlist" then
+		pmcli.playlist_try_play_all()
+		pmcli.open_menu(utils.join_keys(context, item.key))
+	elseif item.name == "Track" then
+		pmcli.playlist_enqueue(item)
+	elseif item.name == "Video" then
+		pmcli.playlist_try_play_all()
+		pmcli.play_video(item)
+	end
+end
+
+
 function pmcli.local_search(search_item, context)
 	io.stdout:write("Query? > ");
 	local query = "&query=" .. http_encode(io.read())
@@ -427,7 +374,7 @@ function pmcli.print_menu(context)
 	-- title2 is reasonably optional, as it marks nested contexts
 	-- title1 is always there, except for global Recently Added and On Deck
 	-- playlists have a "title" :/
-	-- for the sake of compute_title, we amend the payload to correct this
+	-- we amend the payload to correct this
 	if mc.title1 == nil then
 		mc.title1 = "Global"
 		if string.match(context, "recentlyAdded") then
@@ -443,6 +390,7 @@ function pmcli.print_menu(context)
 		end
 	end
 	
+	io.stdout:setvbuf("full")
 	io.stdout:write("\n=== " .. mc.title1 .. (mc.title2 and  " - " .. mc.title2 or "") .. " ===\n")
 	io.stdout:write("0: ..\n")
 	local i = 1
@@ -455,9 +403,51 @@ function pmcli.print_menu(context)
 		else
 			tag = item.name:sub(1,1)
 		end
-		io.stdout:write(tag .. " " .. i .. ": " .. pmcli.compute_title(item, mc) .. "\n")
+		local title
+		if item.title then
+			-- title field is filled, use it
+			-- this should mean there is, generally speaking, available metadata
+			if item.type == "episode" then
+				-- for tv shows we want to show information on show title, season and episode number
+				if mc.mixed_parents and item.grandparent_title and item.index and item.parent_index then
+					-- menus where there is a jumble of shows and episodes, so we must show everything
+					title = string.format("%s - S%02dE%02d - %s",
+					item.grandparent_title,
+					item.parent_index,
+					item.index,
+					item.title)
+				elseif mc.mixed_parents and item.index and item.parent_index then
+					-- mixedParents marks a generic promiscuous context, but we ruled out cases where shows are mixed
+					-- so we only need season and episode
+					title = string.format("S%02dE%02d - %s", item.parent_index, item.index, item.title)
+				elseif item.index then
+					-- here we should be in a specific season, so we only need the episode
+					title = string.format("E%02d - %s", item.index, item.title)
+				end
+			elseif item.type == "movie" and item.year then
+				-- add year
+				title = item.title .. " (" .. item.year .. ")"
+			elseif (item.type == "album" or item.type == "season") and mc.mixed_parents and item.parent_title then
+				-- artist - album / show - season
+				title = item.parent_title .. " - " .. item.title
+			elseif item.name == "Track" and mc.mixed_parents and item.grandparent_title and item.parent_title then
+				-- prefix with artist name and album
+				title = item.grandparent_title .. " - " .. item.parent_title .. " - " .. item.title
+			else
+				-- no need for or availability of further information
+				title = item.title
+			end
+		elseif item.file then
+			-- infer title from corresponding filename, like POSIX basename util
+			title = string.match(item.file, ".*/(.*)%..*")
+		else
+			title = "Unknown title"
+		end
+		io.stdout:write(tag .. " " .. i .. ": " .. title .. "\n")
 		i = i + 1
 	end
+	io.stdout:flush()
+	io.stdout:setvbuf("line")
 end
 
 
@@ -485,9 +475,39 @@ function pmcli.open_menu(context)
 end
 
 
-function pmcli.run()
-	io.stdout:write("Connecting to Plex Server...\n")
-	local _, errmsg = pcall(function()
+function pmcli.quit(error_message)
+	if pmcli.mpv_socket_name then os.remove(pmcli.mpv_socket_name) end
+	if pmcli.sax then pmcli.sax.destroy() end
+	if pmcli.stream_filename then os.remove(pmcli.stream_filename) end
+	if pmcli.session_filename then os.remove(pmcli.session_filename) end
+	os.execute("stty " .. utils.stty_save) -- in case of fatal errors while mpv is running
+	if error_message then
+		io.stderr:write("[!!!] " .. error_message ..  "\n")
+		os.exit(1)
+	else
+		os.exit(0)
+	end
+end
+
+
+function pmcli.start(arg)
+	pmcli.init(arg)
+	
+	if pmcli.options.plex_token then
+		-- check token validity; calling mothership ensures we bypass server-side IP whitelists
+		local ok, errmsg, errno = pmcli.plex_request("", false, "https://plex.tv/pms")
+		if not ok then
+			if errno == "401" then
+				io.stdout:write("[!] Your token was rejected. If your IP address is whitelisted on your server, PMCLI should keep working.\nOtherwise, consider logging in again by passing --login.\n")
+				-- this will remove x-plex-token from API and mpv requests
+				pmcli.options.plex_token = nil
+			else
+				io.stdout:write("[!] Could not validate token: " .. (errno and ("https://plex.tv/pms returned error " .. errno) or errmsg) .. ".\n")
+			end
+		end
+	end
+	
+	_, errmsg = pcall(function()
 		local keys = {
 			"/library/sections",
 			"/library/recentlyAdded",
@@ -495,6 +515,8 @@ function pmcli.run()
 			"/playlists"
 		}
 		while true do
+			-- ensure connectivity to server
+			assert(pmcli.plex_request(""))
 			-- top menu has custom entries, so we manipulate it by hand (heh)
 			io.stdout:write(pmcli.ROOT_MENU)
 			for _,c in ipairs(utils.read_commands()) do
@@ -512,45 +534,10 @@ function pmcli.run()
 	end)
 	pmcli.quit(errmsg)
 end
--- =============================
+-- ===============================
 
 
 -- ========== SETUP ==========
--- command line arguments
-function pmcli.parse_args(args)
-  local parsed_args = {}
-  local i = 1
-  while i <= #args do
-    if args[i] == "--login" then
-      parsed_args.login = true
-    elseif args[i] == "--help" then
-      io.stdout:write(pmcli.HELP_TEXT .. "\n")
-      pmcli.quit()
-    elseif args[i] == "--config" then
-      -- next argument should be parameter
-      if not args[i + 1] then
-        pmcli.quit("--config requires a filename.")
-      end
-      parsed_args.config_filename = args[i + 1]
-      i = i + 1
-    else
-      pmcli.quit("Unrecognized command line option: " .. args[i] .. "\n" .. pmcli.HELP_TEXT)
-    end
-    i = i + 1
-  end
-  return parsed_args
-end
-
-
--- headers for auth access
-function pmcli.setup_headers(headers)
-  headers:append("x-plex-client-identifier", pmcli.options.unique_identifier)
-  headers:append("x-plex-product", "pmcli")
-  headers:append("x-plex-version", pmcli.VERSION)
-  headers:append("x-plex-token", pmcli.options.plex_token, true)
-end
-
-
 function pmcli.login()
 	local plex_token
 	local unique_identifier = "pmcli-" .. utils.generate_random_id()
@@ -676,14 +663,33 @@ end
 
 
 -- inizialize
-function pmcli.init(args)
+function pmcli.init(arg)
 	io.stdout:write("Plex Media CLIent v" ..  pmcli.VERSION .. "\n")
 
-	-- first, read CLI arguments
-	local parsed_args = pmcli.parse_args(args)
+	---- CLI ARGUMENTS ----
+	local parsed_args = {}
+	local i = 1
+	while i <= #arg do
+		if arg[i] == "--login" then
+			parsed_args.login = true
+		elseif arg[i] == "--help" then
+			io.stdout:write(pmcli.HELP_TEXT .. "\n")
+			pmcli.quit()
+		elseif arg[i] == "--config" then
+			-- next argument should be parameter
+			if not arg[i + 1] then
+				pmcli.quit("--config requires a filename.")
+			end
+			parsed_args.config_filename = arg[i + 1]
+			i = i + 1
+		else
+			pmcli.quit("Unrecognized command line option: " .. arg[i] .. "\n" .. pmcli.HELP_TEXT)
+		end
+		i = i + 1
+	end
 
-	-- setup options from config file
-	-- or, alternatively, ask user and login
+	---- CONFIG FILE ----
+	-- read file or ask user and login
 	local must_save_config = false
 	local error_message, error_code
 	pmcli.options, error_message, error_code = utils.get_config(parsed_args.config_filename)
@@ -724,6 +730,7 @@ function pmcli.init(args)
 		end
 	end
 
+	---- MISC OPTIONS ----
 	-- if we need to step around mismatched hostnames from the certificate
 	local http_tls = require("http.tls")
 	http_tls.has_hostname_validation = pmcli.options.require_hostname_validation
@@ -735,7 +742,7 @@ function pmcli.init(args)
 	end
 
 
-	-- temp files
+	---- TEMP FILES ----
 	assert(os.execute("mkdir -p -m 700 /tmp/pmcli"))
 	pmcli.session_filename = "/tmp/pmcli/" .. utils.generate_random_id(10)
 	-- overkill: ensure session id isn't already taken for some reason
