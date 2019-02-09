@@ -1,6 +1,6 @@
 # Plex Media CLIent
 
-[![asciicast](https://asciinema.org/a/lPbaRZjpA4fnMquoZacv3NoPc.png)](https://asciinema.org/a/lPbaRZjpA4fnMquoZacv3NoPc)
+[![asciicast](https://asciinema.org/a/4KcXcaD2fZHNdbyAvugZBcziI.svg)](https://asciinema.org/a/4KcXcaD2fZHNdbyAvugZBcziI)
 
 **Disclaimer**: the client is a side project and learning experience for me. No guarantee whatsoever is offered about it. The target OS is Linux only.
 
