@@ -17,9 +17,8 @@ measure.
 ## Installation
 `luarocks install --server=http://luarocks.org/dev pmcli`. You will then need to manually make sure mpv is installed.
 
-~~Alternatively, there is an [AUR package](https://aur.archlinux.org/packages/pmcli-git/) which will install everything.~~
+Alternatively, there is an [AUR package](https://aur.archlinux.org/packages/pmcli-git/) which will install everything.
 
-The AUR package is currently broken due to an incompatibility in the versions of `lua-http` and `lua-lpeg-patterns` provided there.
 
 ## Usage
 You can launch the client as simply `pmcli`. 
