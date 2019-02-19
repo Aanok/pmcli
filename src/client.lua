@@ -311,7 +311,7 @@ function pmcli.play_video(item)
 			subs = { }
 		}
 		for _,v in ipairs(parts[i]) do
-			if v.tag == "Stream" and v.attr.streamType == 3 and v.attr.key then
+			if v.tag == "Stream" and v.attr.streamType == "3" and v.attr.key then
 				-- it's an external subtitle
 				stream_item.subs[#stream_item.subs + 1] = pmcli.options.base_addr .. v.attr.key
 			end
