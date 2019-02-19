@@ -1,7 +1,7 @@
 -- module
 -- we init some "static" values
 local pmcli = {
-  VERSION = "0.2",
+  VERSION = "0.2.1",
   HELP_TEXT = [[Usage:
   pmcli [ --login ] [ --config configuration_file ]
   pmcli [ --help ] ]],

@@ -1,3 +1,9 @@
+# 0.2.1
+2019/2/19
+
+- Fixed a regression preventing external subtitles from getting loaded
+
+
 # 0.2
 2019/1/17
 
