@@ -1,5 +1,5 @@
 # WARNING!
-This project is currently abandoned, as I have switched my setup from Plex to the FOSS [Jellyfin](http://jellyfin.org/) project.
+**This project is currently abandoned**, as I have switched my setup from Plex to [Jellyfin](http://jellyfin.org/), a fully FOSS fork of Emby server (already leagues ahead of its old master).
 
 I am however developing an [equivalent client](https://github.com/Aanok/jftui) for that platform.
 
