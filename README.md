@@ -1,3 +1,8 @@
+# WARNING!
+This project is currently abandoned, as I have switched my setup from Plex to the FOSS [Jellyfin](http://jellyfin.org/) project.
+
+I am however developing an [equivalent client](https://github.com/Aanok/jftui) for that platform.
+
 # Plex Media CLIent
 
 [![asciicast](https://asciinema.org/a/4KcXcaD2fZHNdbyAvugZBcziI.svg)](https://asciinema.org/a/4KcXcaD2fZHNdbyAvugZBcziI)
